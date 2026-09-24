@@ -1,0 +1,2 @@
+# Solo para desarrollo: las herramientas usan únicamente la librería estándar (sqlite3).
+pytest>=8
