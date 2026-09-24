@@ -1,11 +1,11 @@
-# andimarket-agent
+# agentguard-andimarket
 
 Agente de ANDIMARKET S.A.S. y experimento del proyecto AgentGuard: el mismo agente en dos
 configuraciones.
 
 - **Config. A** (`config_a.py`): el agente ejecuta cualquier herramienta que el modelo pida.
 - **Config. B** (`config_b.py`): el mismo agente con cada herramienta envuelta por
-  [AgentGuard](../AgentGuard), que decide ALLOW, BLOCK o HITL.
+  [agentguard-core](https://github.com/AgentGuard-FDSI/agentguard-core), que decide ALLOW, BLOCK o HITL.
 
 Todo es gratuito: SQLite, FastAPI y un modelo simulado, Gemini o Groq (cuotas gratuitas) u Ollama local.
 
