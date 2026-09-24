@@ -1,0 +1,3 @@
+pyyaml>=6
+pytest>=8
+-e ../AgentGuard

@@ -1,0 +1,4 @@
+# Opcional: solo el proveedor gratuito que se vaya a usar
+google-genai
+groq
+ollama
