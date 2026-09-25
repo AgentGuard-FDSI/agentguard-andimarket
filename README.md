@@ -20,6 +20,20 @@ Todo es gratuito: SQLite, FastAPI y un modelo simulado, Gemini o Groq (cuotas gr
 - API FastAPI para el frontend.
 - `config_a.py` y `config_b.py`. La Config. A no debe importar `agentguard`.
 
+## Config. A (Avance 1, Persona 1)
+
+- `andimarket/agent/loop.py`: bucle del agente (sin validación). `andimarket/models/`: interfaz de modelo y
+  `ScriptedModel` (determinista, sin red). Los modelos reales se adaptan a `ModelClient`.
+- `andimarket/prompts.py`: una solicitud legítima y dos ataques (inyección directa y escalada de privilegios).
+- `andimarket/config_a.py`: la Config. A (no importa `agentguard`); guarda la evidencia en `evidencia/`.
+- Necesita `andimarket/tools.py` con una clase `Tools` (`definitions()` y `execute(name, arguments)`) y las
+  firmas `consultar_pedido(order_id)`, `eliminar_pedido(order_id)` y `admin_action(accion)`.
+
+```bash
+python -m pytest
+python -m andimarket.config_a --prompt inyeccion
+```
+
 ## Estado
 
 Repositorio inicializado. El trabajo se reparte por avances: herramientas, datos y Config. A en el
