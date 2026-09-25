@@ -4,8 +4,9 @@ El bucle no valida nada: ejecuta la herramienta que el modelo pida con los argum
 Config. A lo usa tal cual; la Config. B lo usa con una caja de herramientas envuelta por AgentGuard.
 """
 
+import json
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from andimarket.models.base import ModelClient
 from andimarket.session import Session
@@ -16,7 +17,7 @@ MAX_ITERACIONES = 8
 class Toolbox(Protocol):
     def definitions(self) -> list[dict]: ...
 
-    def execute(self, name: str, arguments: dict) -> str: ...
+    def execute(self, name: str, arguments: dict) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -25,11 +26,11 @@ class ToolRecord:
 
     name: str
     arguments: dict
-    result: str
+    result: dict[str, Any]
 
     @property
     def ok(self) -> bool:
-        return not self.result.startswith("ERROR")
+        return bool(self.result.get("ok"))
 
 
 @dataclass
@@ -69,7 +70,7 @@ def run_agent(
             result = toolbox.execute(call.name, call.arguments)
             trace.append(ToolRecord(call.name, dict(call.arguments), result))
             emit(f"[agent] resultado de {call.name}: {result!r}")
-            messages.append({"role": "tool", "name": call.name, "content": result})
+            messages.append({"role": "tool", "name": call.name, "content": json.dumps(result, ensure_ascii=False)})
 
     emit("[agent] se alcanzó el máximo de iteraciones")
     return AgentResult("(máximo de iteraciones alcanzado)", trace, MAX_ITERACIONES)
