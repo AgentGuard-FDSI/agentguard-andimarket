@@ -1,7 +1,6 @@
 """Interfaz común de modelo para el agent_loop (secciones 5.1 y 8.2 de la propuesta).
 
-El agente (frente de Persona 1) nunca llama directamente a Gemini, Groq u Ollama: llama
-siempre a un objeto que cumple el protocolo `Modelo`, obtenido con `models.get_model()`. Así
+El agente llama siempre a un objeto que cumple el protocolo `Modelo`, obtenido con `models.get_model()`. Así
 el mismo agent_loop funciona igual con cualquier backend, incluido el modo simulado (sin
 llave, determinista) que se usa en la demostración en vivo (sección 4 de la propuesta).
 

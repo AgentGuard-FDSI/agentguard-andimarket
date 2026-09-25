@@ -1,14 +1,7 @@
-"""Interfaz de modelo intercambiable (secciones 5.1 y 8.2 de la propuesta — Persona 4).
+"""Interfaz de modelo intercambiable.
 
     from models import get_model
     modelo = get_model()  # MODEL_BACKEND del entorno, o "simulado" si no hay ninguno
-
-Backends disponibles: "simulado" (determinista, sin llave — el que usa la demostración en
-vivo y el que desbloquea a Persona 1 sin depender de ninguna cuota), "gemini" (Google AI
-Studio, cuota gratuita sin tarjeta), "groq" (cuota gratuita) y "ollama" (modelo local).
-
-Cada import de backend es perezoso (adentro de la función, no al tope del módulo): pedir el
-modelo simulado no debe requerir tener instalada ni configurada ninguna llave de los otros.
 """
 
 from __future__ import annotations

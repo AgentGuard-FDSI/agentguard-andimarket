@@ -16,9 +16,6 @@ from .base import ModeloError, RespuestaModelo, ToolCall
 _CLAVES_SCHEMA_GEMINI = {"type", "description", "properties", "required", "enum", "items", "format", "nullable"}
 
 
-# ---------------------------------------------------------------------------
-# Estilo OpenAI (Groq, Ollama)
-# ---------------------------------------------------------------------------
 def tools_openai(tool_definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -86,10 +83,6 @@ def respuesta_desde_openai(mensaje: dict[str, Any], *, prefijo_id: str) -> Respu
         return RespuestaModelo(tool_calls=tuple(llamadas))
     return RespuestaModelo(texto=mensaje.get("content") or "")
 
-
-# ---------------------------------------------------------------------------
-# Gemini
-# ---------------------------------------------------------------------------
 def _schema_gemini(schema: Any) -> Any:
     if isinstance(schema, dict):
         limpio = {k: v for k, v in schema.items() if k in _CLAVES_SCHEMA_GEMINI}

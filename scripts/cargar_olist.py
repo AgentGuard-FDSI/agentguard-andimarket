@@ -1,4 +1,4 @@
-"""Carga de datos de ANDIMARKET S.A.S. (Persona 4, Avance 1; secciones 2.1, 2.2 y 8.2).
+"""Carga de datos de ANDIMARKET S.A.S.
 
 Crea la base limpia `data/andimarket_base.db`, que `tools.reset_db()` copia sobre la base de
 trabajo antes de cada corrida, con un subconjunto de 50 a 200 pedidos.
