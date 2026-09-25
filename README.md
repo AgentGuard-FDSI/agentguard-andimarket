@@ -25,10 +25,13 @@ Todo es gratuito: SQLite, FastAPI y un modelo simulado, Gemini o Groq (cuotas gr
 - `andimarket/agent/loop.py`: bucle del agente (sin validación). `andimarket/models/`: interfaz de modelo y
   `ScriptedModel` (determinista, sin red). Los modelos reales se adaptan a `ModelClient`.
 - `andimarket/toolbox.py`: adaptador del paquete `tools` (`execute_tool`, `TOOL_DEFINITIONS`) al bucle.
-- `andimarket/prompts.py`: una solicitud legítima y dos ataques (inyección directa y escalada de privilegios).
+- `andimarket/prompts.py`: una solicitud legítima y cuatro ataques (inyección directa, escalada de privilegios,
+  exfiltración indirecta y datos confidenciales).
+- `andimarket/criterio.py`: criterio de éxito automático (sección 4.3), calculado sobre la bitácora de efectos y no
+  sobre lo que diga el modelo.
 - `andimarket/config_a.py`: la Config. A (no importa `agentguard`). Fija el contexto de la corrida
   (`run_context` con config A, usuario y área) para que la bitácora de efectos lo registre.
-- `evidencia/`: JSON de las corridas de la Config. A con los datos de prueba (`db/seed_test.sql`).
+- `evidencia/`: JSON de las corridas de la Config. A con los datos de prueba (`db/seed_test.sql`) y su veredicto.
 
 ```bash
 python -m pytest
