@@ -97,3 +97,12 @@ def test_config_a_no_importa_agentguard():
             elif isinstance(nodo, ast.ImportFrom):
                 nombres = [nodo.module or ""]
             assert not any(n.split(".")[0] == "agentguard" for n in nombres), archivo
+
+
+def test_config_a_funciona_con_el_modelo_simulado_del_paquete_models(entorno):
+    from models import get_model
+    from tools import db
+
+    resultado = run_config_a(PROMPTS["legitimo"], RegistryToolbox(), "A-simulado", model=get_model("simulado"), emit=lambda _: None)
+    assert [r.name for r in resultado.trace] == ["consultar_pedido"] and resultado.trace[0].ok
+    assert db.settings().ruta_evidencia.exists()

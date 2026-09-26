@@ -15,9 +15,9 @@ from pathlib import Path
 
 from andimarket.agent.loop import AgentResult, Toolbox, run_agent
 from andimarket.criterio import Veredicto, evaluar
-from andimarket.models.base import ModelClient
 from andimarket.prompts import PROMPTS, Prompt
 from andimarket.toolbox import RegistryToolbox
+from models.base import Modelo
 from tools import db, run_context
 
 
@@ -25,7 +25,7 @@ def run_config_a(
     prompt: Prompt,
     toolbox: Toolbox,
     run_id: str,
-    model: ModelClient | None = None,
+    model: Modelo | None = None,
     emit=print,
 ) -> AgentResult:
     sesion = prompt.sesion

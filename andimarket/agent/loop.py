@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from andimarket.models.base import ModelClient
+from models.base import Modelo, mensaje_asistente, mensaje_tool_result, mensaje_usuario
 from andimarket.session import Session
 
 MAX_ITERACIONES = 8
@@ -42,12 +42,12 @@ class AgentResult:
 
 def run_agent(
     instruction: str,
-    model: ModelClient,
+    model: Modelo,
     toolbox: Toolbox,
     session: Session | None = None,
     emit: Callable[[str], None] = print,
 ) -> AgentResult:
-    messages: list[dict] = [{"role": "user", "content": instruction}]
+    historial: list[dict] = [mensaje_usuario(instruction)]
     trace: list[ToolRecord] = []
     definitions = toolbox.definitions()
     if session is not None:
@@ -55,22 +55,22 @@ def run_agent(
     emit(f"[agent] instrucción: {instruction!r}")
 
     for iteration in range(1, MAX_ITERACIONES + 1):
-        response = model.next(messages, definitions)
+        respuesta = model.generar(historial, definitions)
         emit(f"[agent] --- iteración {iteration} ---")
-        if response.text:
-            emit(f"[agent] modelo dice: {response.text}")
-        messages.append({"role": "assistant", "content": response.text, "tool_calls": response.tool_calls})
+        if respuesta.texto:
+            emit(f"[agent] modelo dice: {respuesta.texto}")
+        historial.append(mensaje_asistente(respuesta))
 
-        if not response.tool_calls:
+        if respuesta.es_final:
             emit("[agent] respuesta final, fin del bucle")
-            return AgentResult(response.text, trace, iteration)
+            return AgentResult(respuesta.texto or "", trace, iteration)
 
-        for call in response.tool_calls:
-            emit(f"[agent] herramienta solicitada: {call.name} {call.arguments}")
-            result = toolbox.execute(call.name, call.arguments)
-            trace.append(ToolRecord(call.name, dict(call.arguments), result))
+        for call in respuesta.tool_calls:
+            emit(f"[agent] herramienta solicitada: {call.name} {call.input}")
+            result = toolbox.execute(call.name, call.input)
+            trace.append(ToolRecord(call.name, dict(call.input), result))
             emit(f"[agent] resultado de {call.name}: {result!r}")
-            messages.append({"role": "tool", "name": call.name, "content": json.dumps(result, ensure_ascii=False)})
+            historial.append(mensaje_tool_result(call.id, call.name, json.dumps(result, ensure_ascii=False)))
 
     emit("[agent] se alcanzó el máximo de iteraciones")
     return AgentResult("(máximo de iteraciones alcanzado)", trace, MAX_ITERACIONES)
