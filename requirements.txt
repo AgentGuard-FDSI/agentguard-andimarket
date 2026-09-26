@@ -1,0 +1,5 @@
+# Dependencias de ejecución de agentguard-andimarket.
+# tools/ y scripts/cargar_olist.py solo usan la librería estándar (sqlite3, csv).
+# models/ usa requests para los backends remotos (Gemini, Groq, Ollama); el modo simulado
+# no hace llamadas de red.
+requests>=2.31

@@ -20,6 +20,44 @@ Todo es gratuito: SQLite, FastAPI y un modelo simulado, Gemini o Groq (cuotas gr
 - API FastAPI para el frontend.
 - `config_a.py` y `config_b.py`. La Config. A no debe importar `agentguard`.
 
+## Puesta en marcha
+
+### Requisitos
+
+Python 3.10 o superior. En Windows, instálalo desde https://www.python.org/downloads/ marcando
+la casilla "Add Python to PATH"; verifica con `py --version`.
+
+### Instalación
+
+**Windows (cmd o PowerShell):**
+
+    py -m venv .venv
+    .venv\Scripts\activate
+    pip install -r requirements.txt -r requirements-dev.txt
+
+**Linux / macOS:**
+
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt -r requirements-dev.txt
+
+### Generar la base de datos
+
+    python scripts/cargar_olist.py
+
+Crea `data/andimarket_base.db` (sintética, 150 pedidos + los 5 de demostración: 123 a 127). No se
+sube a git.
+
+Para probar el agente con el modelo simulado, En **Windows** ejecutar:
+
+    python demo.py
+
+De lo contrario, ejecutar el bloque en la terminar Unix.
+
+### Pruebas
+
+    pytest
+
 ## Estado
 
 Repositorio inicializado. El trabajo se reparte por avances: herramientas, datos y Config. A en el
