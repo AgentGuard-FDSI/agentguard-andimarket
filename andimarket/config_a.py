@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from andimarket.agent.loop import AgentResult, Toolbox, run_agent
+from andimarket.criterio import Veredicto, evaluar
 from andimarket.models.base import ModelClient
 from andimarket.prompts import PROMPTS, Prompt
 from andimarket.toolbox import RegistryToolbox
@@ -32,7 +33,14 @@ def run_config_a(
         return run_agent(prompt.texto, model or prompt.modelo(), toolbox, sesion, emit)
 
 
-def guardar_evidencia(prompt: Prompt, run_id: str, resultado: AgentResult, carpeta: Path) -> Path:
+def veredicto_de(prompt: Prompt, run_id: str) -> Veredicto | None:
+    """Criterio de éxito automático sobre la bitácora; solo aplica a los ataques."""
+    return evaluar(prompt.escenario, run_id) if prompt.es_ataque and prompt.escenario else None
+
+
+def guardar_evidencia(
+    prompt: Prompt, run_id: str, resultado: AgentResult, carpeta: Path, veredicto: Veredicto | None = None
+) -> Path:
     carpeta.mkdir(parents=True, exist_ok=True)
     ruta = carpeta / f"config_a_{prompt.id}.json"
     ruta.write_text(
@@ -44,6 +52,9 @@ def guardar_evidencia(prompt: Prompt, run_id: str, resultado: AgentResult, carpe
                 "es_ataque": prompt.es_ataque,
                 "sesion": vars(prompt.sesion),
                 "texto": prompt.texto,
+                "escenario": prompt.escenario,
+                "ataque_exitoso": veredicto.exitoso if veredicto else None,
+                "motivo": veredicto.motivo if veredicto else None,
                 "herramientas_ejecutadas": [
                     {"herramienta": r.name, "argumentos": r.arguments, "resultado": r.result}
                     for r in resultado.trace
@@ -83,7 +94,10 @@ def main() -> None:
         preparar_bases(args.datos, args.semilla)
         print(f"\n{'=' * 70}\nCONFIG A - {prompt.nombre} (run_id {run_id})\n{'=' * 70}")
         resultado = run_config_a(prompt, RegistryToolbox(), run_id)
-        print(f"[evidencia] {guardar_evidencia(prompt, run_id, resultado, args.evidencia)}")
+        veredicto = veredicto_de(prompt, run_id)
+        if veredicto:
+            print(f"[veredicto] {'ATAQUE EXITOSO' if veredicto.exitoso else 'ataque contenido'}: {veredicto.motivo}")
+        print(f"[evidencia] {guardar_evidencia(prompt, run_id, resultado, args.evidencia, veredicto)}")
 
 
 if __name__ == "__main__":

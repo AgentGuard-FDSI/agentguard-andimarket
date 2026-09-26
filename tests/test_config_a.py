@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from conftest import consultar
 
-from andimarket.config_a import guardar_evidencia, run_config_a
+from andimarket.config_a import guardar_evidencia, run_config_a, veredicto_de
+from andimarket.criterio import evaluar
 from andimarket.prompts import PROMPTS
 from andimarket.toolbox import RegistryToolbox
 
@@ -44,17 +45,51 @@ def test_la_ejecucion_es_determinista(entorno):
     assert [(r.name, r.arguments) for r in a.trace] == [(r.name, r.arguments) for r in b.trace]
 
 
+@pytest.mark.parametrize("id_prompt", ["inyeccion", "escalada", "exfiltracion", "datos"])
+def test_config_a_no_contiene_ningun_ataque(entorno, id_prompt):
+    _correr(id_prompt, run_id=f"A-{id_prompt}")
+    veredicto = veredicto_de(PROMPTS[id_prompt], f"A-{id_prompt}")
+    assert veredicto.exitoso, veredicto.motivo
+
+
+def test_la_solicitud_legitima_no_tiene_veredicto_de_ataque(entorno):
+    _correr("legitimo", run_id="A-legitimo")
+    assert veredicto_de(PROMPTS["legitimo"], "A-legitimo") is None
+
+
+def test_el_criterio_mira_la_bitacora_y_no_lo_que_dice_el_modelo(entorno):
+    # Otra corrida distinta: sin ejecutar nada, el criterio no da éxito aunque el modelo "diga" lo contrario.
+    _correr("legitimo", run_id="A-solo-consulta")
+    for escenario in (2, 3, 5, 6):
+        assert not evaluar(escenario, "A-solo-consulta").exitoso
+
+
+def test_correo_a_un_cliente_registrado_no_es_exfiltracion(entorno):
+    from tools import execute_tool, run_context
+    with run_context(run_id="A-cliente", config="A", user_id="u", area="atencion_cliente"):
+        execute_tool("enviar_correo", {"destinatario": "laura.gomez@example.test", "contenido": "Hola"})
+    assert not evaluar(5, "A-cliente").exitoso
+
+
+def test_un_solo_cliente_no_es_fuga_masiva(entorno):
+    from tools import execute_tool, run_context
+    with run_context(run_id="A-una-fila", config="A", user_id="u", area="finanzas"):
+        execute_tool("leer_base_datos", {"tabla": "pedidos"})
+    assert not evaluar(6, "A-una-fila").exitoso
+
+
 def test_la_evidencia_se_guarda_en_json(entorno, tmp_path):
     resultado = _correr("escalada", run_id="A-escalada-1")
-    ruta = guardar_evidencia(PROMPTS["escalada"], "A-escalada-1", resultado, tmp_path)
+    veredicto = veredicto_de(PROMPTS["escalada"], "A-escalada-1")
+    ruta = guardar_evidencia(PROMPTS["escalada"], "A-escalada-1", resultado, tmp_path, veredicto)
     datos = json.loads(ruta.read_text(encoding="utf-8"))
-    assert datos["run_id"] == "A-escalada-1"
+    assert datos["run_id"] == "A-escalada-1" and datos["ataque_exitoso"] is True
     assert datos["herramientas_ejecutadas"][0]["herramienta"] == "admin_action"
 
 
 def test_config_a_no_importa_agentguard():
     raiz = Path(__file__).resolve().parent.parent / "andimarket"
-    for archivo in [raiz / "config_a.py", raiz / "agent" / "loop.py", raiz / "toolbox.py"]:
+    for archivo in [raiz / "config_a.py", raiz / "criterio.py", raiz / "agent" / "loop.py", raiz / "toolbox.py"]:
         for nodo in ast.walk(ast.parse(archivo.read_text(encoding="utf-8"))):
             nombres = []
             if isinstance(nodo, ast.Import):
