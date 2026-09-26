@@ -20,18 +20,62 @@ Todo es gratuito: SQLite, FastAPI y un modelo simulado, Gemini o Groq (cuotas gr
 - API FastAPI para el frontend.
 - `config_a.py` y `config_b.py`. La Config. A no debe importar `agentguard`.
 
+## Puesta en marcha
+
+### Requisitos
+
+Python 3.10 o superior. En Windows, instálalo desde https://www.python.org/downloads/ marcando
+la casilla "Add Python to PATH"; verifica con `py --version`.
+
+### Instalación
+
+**Windows (cmd o PowerShell):**
+
+    py -m venv .venv
+    .venv\Scripts\activate
+    pip install -r requirements.txt -r requirements-dev.txt
+
+**Linux / macOS:**
+
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt -r requirements-dev.txt
+
+### Generar la base de datos
+
+    python scripts/cargar_olist.py
+
+Crea `data/andimarket_base.db` (sintética, 150 pedidos + los 5 de demostración: 123 a 127). No se
+sube a git.
+
+Para probar el agente con el modelo simulado, En **Windows** ejecutar:
+
+    python demo.py
+
+De lo contrario, ejecutar el bloque en la terminar Unix.
+
+### Pruebas
+
+    pytest
+
 ## Config. A (Avance 1, Persona 1)
 
-- `andimarket/agent/loop.py`: bucle del agente (sin validación). `andimarket/models/`: interfaz de modelo y
-  `ScriptedModel` (determinista, sin red). Los modelos reales se adaptan a `ModelClient`.
-- `andimarket/prompts.py`: una solicitud legítima y dos ataques (inyección directa y escalada de privilegios).
-- `andimarket/config_a.py`: la Config. A (no importa `agentguard`); guarda la evidencia en `evidencia/`.
-- Necesita `andimarket/tools.py` con una clase `Tools` (`definitions()` y `execute(name, arguments)`) y las
-  firmas `consultar_pedido(order_id)`, `eliminar_pedido(order_id)` y `admin_action(accion)`.
+- `andimarket/agent/loop.py`: bucle del agente (sin validación), sobre la interfaz `Modelo` del paquete `models`.
+  `andimarket/modelo_guion.py`: modelo de guion (determinista, sin red) para los ataques que el modelo simulado
+  por reglas no reproduce, como la inyección indirecta.
+- `andimarket/toolbox.py`: adaptador del paquete `tools` (`execute_tool`, `TOOL_DEFINITIONS`) al bucle.
+- `andimarket/prompts.py`: una solicitud legítima y cuatro ataques (inyección directa, escalada de privilegios,
+  exfiltración indirecta y datos confidenciales).
+- `andimarket/criterio.py`: criterio de éxito automático (sección 4.3), calculado sobre la bitácora de efectos y no
+  sobre lo que diga el modelo.
+- `andimarket/config_a.py`: la Config. A (no importa `agentguard`). Fija el contexto de la corrida
+  (`run_context` con config A, usuario y área) para que la bitácora de efectos lo registre.
+- `evidencia/`: JSON de las corridas de la Config. A y su veredicto. Usa `data/andimarket_base.db` si existe
+  (`python scripts/cargar_olist.py`); si no, la crea con los datos de prueba (`db/seed_test.sql`).
 
 ```bash
 python -m pytest
-python -m andimarket.config_a --prompt inyeccion
+python -m andimarket.config_a --prompt todos
 ```
 
 ## Estado
