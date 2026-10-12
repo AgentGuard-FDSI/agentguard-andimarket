@@ -3,3 +3,8 @@
 # models/ usa requests para los backends remotos (Gemini, Groq, Ollama); el modo simulado
 # no hace llamadas de red.
 requests>=2.31
+
+# AgentGuard (Config. B). El repositorio agentguard-core debe estar clonado junto a este
+# (misma carpeta padre): de ahí se instala el paquete y se lee config/policies.yaml.
+# Ejecutar pip desde la raíz de este repositorio.
+-e ../agentguard-core

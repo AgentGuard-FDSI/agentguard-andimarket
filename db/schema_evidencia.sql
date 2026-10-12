@@ -38,3 +38,38 @@ CREATE TRIGGER IF NOT EXISTS bitacora_sin_delete BEFORE DELETE ON bitacora_efect
 BEGIN
     SELECT RAISE(ABORT, 'bitacora_efectos es de solo inserción');
 END;
+
+-- Audit log de AgentGuard (Config. B, Avance 2): una fila por cada decisión de authorize(),
+-- con el contexto de la corrida y, si fue HITL, el resultado de la aprobación. Se escribe
+-- ANTES de ejecutar la herramienta: si no se puede registrar, la acción no se ejecuta.
+-- AVANCE 3 (Persona 3): encadenamiento con SHA-256 (columna con el hash de la fila anterior)
+-- y aprobador distinto del solicitante.
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,       -- UTC, ISO 8601
+    run_id      TEXT NOT NULL,
+    config      TEXT NOT NULL,       -- B (la Config. A no pasa por AgentGuard)
+    usuario     TEXT NOT NULL,
+    area        TEXT NOT NULL,
+    nivel       TEXT NOT NULL,
+    tool        TEXT NOT NULL,
+    args_json   TEXT NOT NULL,       -- json.dumps(args, sort_keys=True)
+    decision    TEXT NOT NULL CHECK (decision IN ('ALLOW', 'BLOCK', 'HITL')),
+    regla       TEXT NOT NULL,       -- código de la regla (fuera_de_rol, accion_base, ...)
+    motivo      TEXT NOT NULL,
+    aprobado    INTEGER CHECK (aprobado IN (0, 1)),  -- NULL si no hubo HITL
+    aprobador   TEXT,                -- NULL si no hubo HITL
+    autorizada  INTEGER NOT NULL CHECK (autorizada IN (0, 1))  -- 1 si se envió a ejecutar
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_logs (run_id);
+
+CREATE TRIGGER IF NOT EXISTS audit_sin_update BEFORE UPDATE ON audit_logs
+BEGIN
+    SELECT RAISE(ABORT, 'audit_logs es de solo inserción');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_sin_delete BEFORE DELETE ON audit_logs
+BEGIN
+    SELECT RAISE(ABORT, 'audit_logs es de solo inserción');
+END;

@@ -10,12 +10,12 @@ filtrable por run_id, además de un JSON con lo que el agente ejecutó en `evide
 
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from andimarket.agent.loop import AgentResult, Toolbox, run_agent
 from andimarket.criterio import Veredicto, evaluar
 from andimarket.prompts import PROMPTS, Prompt
+from andimarket.run_id import nuevo_run_id
 from andimarket.toolbox import RegistryToolbox
 from models.base import Modelo
 from tools import db, run_context
@@ -90,7 +90,7 @@ def main() -> None:
     ids = sorted(PROMPTS) if args.prompt == "todos" else [args.prompt]
     for id_prompt in ids:
         prompt = PROMPTS[id_prompt]
-        run_id = f"A-{id_prompt}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+        run_id = nuevo_run_id("A", id_prompt)
         preparar_bases(args.datos, args.semilla)
         print(f"\n{'=' * 70}\nCONFIG A - {prompt.nombre} (run_id {run_id})\n{'=' * 70}")
         resultado = run_config_a(prompt, RegistryToolbox(), run_id)
