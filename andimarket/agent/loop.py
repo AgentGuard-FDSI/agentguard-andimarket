@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from models.base import Modelo, mensaje_asistente, mensaje_tool_result, mensaje_usuario
+from models.base import Modelo, mensaje_asistente, mensaje_sistema, mensaje_tool_result, mensaje_usuario
 from andimarket.session import Session
 
 MAX_ITERACIONES = 8
@@ -46,8 +46,9 @@ def run_agent(
     toolbox: Toolbox,
     session: Session | None = None,
     emit: Callable[[str], None] = print,
+    sistema: str | None = None,
 ) -> AgentResult:
-    historial: list[dict] = [mensaje_usuario(instruction)]
+    historial: list[dict] = ([mensaje_sistema(sistema)] if sistema else []) + [mensaje_usuario(instruction)]
     trace: list[ToolRecord] = []
     definitions = toolbox.definitions()
     if session is not None:
