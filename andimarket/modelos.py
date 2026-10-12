@@ -25,5 +25,5 @@ def crear_modelo(nombre: str, prompt: Prompt) -> Modelo:
 
 
 def nombre_de(modelo: Modelo) -> str:
-    """Nombre que se reporta en la evidencia, p. ej. "guion" o "gemini:gemini-2.5-flash"."""
+    """Nombre que se reporta en la evidencia, p. ej. "guion" o "gemini:gemini-3.8-flash"."""
     return str(getattr(modelo, "nombre", type(modelo).__name__))

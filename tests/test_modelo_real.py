@@ -106,8 +106,8 @@ def test_gemini_sin_llave_falla_con_mensaje_claro(monkeypatch, sin_dotenv):
 
 def test_la_evidencia_registra_el_modelo(entorno, tmp_path):
     resultado = run_config_a(PROMPTS["legitimo"], RegistryToolbox(), "A-ev", emit=lambda _: None)
-    ruta = guardar_evidencia(PROMPTS["legitimo"], "A-ev", resultado, tmp_path, modelo="gemini:gemini-2.5-flash")
-    assert json.loads(ruta.read_text(encoding="utf-8"))["modelo"] == "gemini:gemini-2.5-flash"
+    ruta = guardar_evidencia(PROMPTS["legitimo"], "A-ev", resultado, tmp_path, modelo="gemini:gemini-3.8-flash")
+    assert json.loads(ruta.read_text(encoding="utf-8"))["modelo"] == "gemini:gemini-3.8-flash"
 
 
 # ---------------------------------------------------------------------------
