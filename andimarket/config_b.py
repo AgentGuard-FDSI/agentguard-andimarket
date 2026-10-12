@@ -22,7 +22,6 @@ import argparse
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 
 from agentguard import AgentGuard, Approver, ConsoleApprover, FixedApprover
@@ -32,6 +31,7 @@ from andimarket.agent.loop import AgentResult, run_agent
 from andimarket.config_a import preparar_bases, veredicto_de
 from andimarket.criterio import Veredicto
 from andimarket.prompts import PROMPTS, Prompt
+from andimarket.run_id import nuevo_run_id
 from andimarket.toolbox import RegistryToolbox
 from andimarket.toolbox_guard import GuardedToolbox
 from models.base import Modelo
@@ -146,7 +146,7 @@ def main() -> None:
     ids = sorted(PROMPTS) if args.prompt == "todos" else [args.prompt]
     for id_prompt in ids:
         prompt = PROMPTS[id_prompt]
-        run_id = f"B-{id_prompt}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+        run_id = nuevo_run_id("B", id_prompt)
         preparar_bases(args.datos, args.semilla)
         print(f"\n{'=' * 70}\nCONFIG B - {prompt.nombre} (run_id {run_id})\n{'=' * 70}")
         resultado = run_config_b(prompt, guard, crear_aprobador(args.aprobador), run_id)
