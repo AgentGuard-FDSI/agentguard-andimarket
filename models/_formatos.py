@@ -54,13 +54,16 @@ def mensajes_openai(historial: list[dict[str, Any]], *, argumentos_como_texto: b
                 ]
             salida.append(msg)
         elif rol == "tool":
-            salida.append({
+            resultado = {
                 "role": "tool",
                 "tool_call_id": m.get("tool_call_id"),
                 "name": m.get("name"),
-                "tool_name": m.get("name"),  # Ollama usa tool_name; Groq lo ignora
                 "content": str(m.get("content") or ""),
-            })
+            }
+            if not argumentos_como_texto:
+                # Solo Ollama usa tool_name; Groq lo rechaza con HTTP 400 ("property 'tool_name' is unsupported").
+                resultado["tool_name"] = m.get("name")
+            salida.append(resultado)
         else:
             raise ModeloError(f"rol desconocido en el historial: {rol!r}")
     return salida

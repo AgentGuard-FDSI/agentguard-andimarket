@@ -139,6 +139,8 @@ def test_formato_openai_groq_y_ollama():
     assert groq[2]["tool_calls"][0]["function"]["arguments"] == '{"order_id": "123"}'
     assert ollama[2]["tool_calls"][0]["function"]["arguments"] == {"order_id": "123"}
     assert groq[3]["tool_call_id"] == "c1"
+    # Groq rechaza (HTTP 400) el campo tool_name en los mensajes de herramienta; Ollama lo usa.
+    assert "tool_name" not in groq[3] and ollama[3]["tool_name"] == "consultar_pedido"
     tools = _formatos.tools_openai(TOOL_DEFINITIONS)
     assert {t["function"]["name"] for t in tools} == {d["name"] for d in TOOL_DEFINITIONS}
 
