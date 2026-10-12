@@ -17,8 +17,9 @@ Métricas (sección 4.2):
   * latencia añadida por AgentGuard: mediana y p95 de authorize(), en milisegundos;
   * distribución de decisiones de AgentGuard (ALLOW, BLOCK, HITL).
 
-Una corrida en la que el modelo falla (cuota agotada, error de red) se registra como error y no
-cuenta en las tasas: se reporta aparte.
+Una corrida en la que el modelo falla (cuota, demanda alta, un 403 transitorio) se repite desde una
+base limpia y con un run_id nuevo, tras una espera (--reintentos, --espera-reintento). Si sigue
+fallando, se registra como error y no cuenta en las tasas: se reporta aparte.
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ class Corrida:
     decisiones: list[str] = field(default_factory=list)
     respuesta_final: str = ""
     error: str | None = None
+    intentos: int = 1
     segundos: float = 0.0
 
 
@@ -194,7 +196,8 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
         f"- Modelo: `{info['modelo']}` (temperatura {info['temperatura']})",
         f"- Repeticiones por prompt y configuración: {info['repeticiones']}",
         f"- Aprobador HITL en la Config. B: {info['aprobador']}",
-        f"- Corridas con error del modelo (excluidas de las tasas): {m['errores']}",
+        f"- Corridas con error del modelo tras reintentar (excluidas de las tasas): {m['errores']}",
+        f"- Reintentos por fallas transitorias del modelo: {info['reintentos_usados']}",
         "",
         "## Resultado por prompt",
         "",
@@ -236,9 +239,26 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
     return "\n".join(lineas) + "\n"
 
 
+def correr_con_reintentos(
+    config: str, id_prompt: str, repeticion: int, nombre_modelo: str, guard: GuardCronometrado,
+    aprobador: Approver, *, carpeta_datos: Path, reintentos: int, espera: float, emit=print,
+) -> Corrida:
+    """Repite una corrida que falló por el modelo, siempre desde la base limpia y con run_id nuevo."""
+    for intento in range(1, reintentos + 2):
+        preparar_bases(carpeta_datos, db.SEED_TEST)
+        corrida = correr(config, id_prompt, repeticion, nombre_modelo, guard, aprobador)
+        corrida.intentos = intento
+        if corrida.error is None or intento > reintentos:
+            return corrida
+        emit(f"    reintento {intento}/{reintentos} de {config}/{id_prompt} en {espera:.0f} s ({corrida.error[:70]})")
+        time.sleep(espera)
+    return corrida
+
+
 def ejecutar(
     nombre_modelo: str, repeticiones: int, *, carpeta_datos: Path, carpeta_salida: Path,
-    aprobador: str = "rechazar", pausa: float = 0.0, emit=print,
+    aprobador: str = "rechazar", pausa: float = 0.0, reintentos: int = 0, espera_reintento: float = 30.0,
+    emit=print,
 ) -> tuple[Path, Path, dict[str, Any]]:
     # Falla de inmediato si el modelo no se puede crear (p. ej. falta la llave), antes de gastar corridas.
     crear_modelo(nombre_modelo, PROMPTS["legitimo"])
@@ -251,8 +271,10 @@ def ejecutar(
     for rep in range(1, repeticiones + 1):
         for id_prompt in PROMPTS:
             for config in CONFIGS:
-                preparar_bases(carpeta_datos, db.SEED_TEST)
-                corrida = correr(config, id_prompt, rep, nombre_modelo, guard, aprobador_obj)
+                corrida = correr_con_reintentos(
+                    config, id_prompt, rep, nombre_modelo, guard, aprobador_obj,
+                    carpeta_datos=carpeta_datos, reintentos=reintentos, espera=espera_reintento, emit=emit,
+                )
                 corridas.append(corrida)
                 estado = (
                     f"ERROR: {corrida.error[:80]}" if corrida.error
@@ -271,6 +293,7 @@ def ejecutar(
         "temperatura": os.environ.get("MODEL_TEMPERATURE", "0"),
         "repeticiones": repeticiones,
         "aprobador": aprobador,
+        "reintentos_usados": sum(c.intentos - 1 for c in corridas),
     }
     carpeta_salida.mkdir(parents=True, exist_ok=True)
     base = carpeta_salida / f"comparacion_{re.sub(r'[^A-Za-z0-9._-]+', '_', info['modelo'])}"
@@ -291,16 +314,20 @@ def main() -> None:
                         help="respuesta del aprobador HITL en la Config. B (por defecto rechaza)")
     parser.add_argument("--pausa", type=float, default=None,
                         help="segundos entre corridas (por defecto 4 con modelos remotos, 0 sin red)")
+    parser.add_argument("--reintentos", type=int, default=None,
+                        help="veces que se repite una corrida si falla el modelo (por defecto 3 con remotos, 0 sin red)")
+    parser.add_argument("--espera-reintento", type=float, default=30.0, help="segundos antes de reintentar")
     parser.add_argument("--datos", type=Path, default=Path("data/experimento"))
     parser.add_argument("--salida", type=Path, default=Path("evidencia"))
     args = parser.parse_args()
     if args.repeticiones < 1:
         parser.error("--repeticiones debe ser al menos 1")
     pausa = args.pausa if args.pausa is not None else (4.0 if args.modelo in REMOTOS else 0.0)
+    reintentos = args.reintentos if args.reintentos is not None else (3 if args.modelo in REMOTOS else 0)
 
     ruta_json, ruta_md, _ = ejecutar(
         args.modelo, args.repeticiones, carpeta_datos=args.datos, carpeta_salida=args.salida,
-        aprobador=args.aprobador, pausa=pausa,
+        aprobador=args.aprobador, pausa=pausa, reintentos=reintentos, espera_reintento=args.espera_reintento,
     )
     print()
     print(ruta_md.read_text(encoding="utf-8"))

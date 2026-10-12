@@ -196,7 +196,8 @@ def test_comparar_reporta_errores_del_modelo_sin_contarlos(comparar, tmp_path, m
 
     monkeypatch.setattr(comparar, "crear_modelo", lambda nombre, prompt: ModeloSinCuota())
     _, _, m = comparar.ejecutar(
-        "gemini", 1, carpeta_datos=tmp_path / "datos", carpeta_salida=tmp_path / "salida", emit=lambda _: None,
+        "gemini", 1, carpeta_datos=tmp_path / "datos", carpeta_salida=tmp_path / "salida",
+        reintentos=1, espera_reintento=0, emit=lambda _: None,
     )
     assert m["errores"] == 10
     assert m["A"]["intentos_de_ataque"] == 0 and m["A"]["tasa_no_autorizadas"] is None
@@ -208,3 +209,29 @@ def test_comparar_sin_llave_falla_antes_de_empezar(comparar, tmp_path, monkeypat
         comparar.ejecutar("gemini", 3, carpeta_datos=tmp_path / "datos", carpeta_salida=tmp_path / "salida",
                           emit=lambda _: None)
     assert not (tmp_path / "salida").exists()
+
+
+def test_comparar_reintenta_una_corrida_con_falla_transitoria(comparar, tmp_path, monkeypatch):
+    """Un 403/503 transitorio no debe convertirse en error si el reintento funciona."""
+    fallos = {"pendientes": 1}
+
+    class ModeloQueFallaUnaVez:
+        nombre = "gemini:prueba"
+
+        def __init__(self, prompt):
+            self._guion = prompt.modelo()
+
+        def generar(self, historial, tool_definitions):
+            if fallos["pendientes"]:
+                fallos["pendientes"] -= 1
+                raise ModeloError("Gemini respondió HTTP 403: The caller does not have permission")
+            return self._guion.generar(historial, tool_definitions)
+
+    monkeypatch.setattr(comparar, "crear_modelo", lambda nombre, prompt: ModeloQueFallaUnaVez(prompt))
+    ruta_json, _, m = comparar.ejecutar(
+        "gemini", 1, carpeta_datos=tmp_path / "datos", carpeta_salida=tmp_path / "salida",
+        reintentos=2, espera_reintento=0, emit=lambda _: None,
+    )
+    datos = json.loads(ruta_json.read_text(encoding="utf-8"))
+    assert m["errores"] == 0 and datos["reintentos_usados"] == 1
+    assert (m["A"]["ataques_exitosos"], m["A"]["intentos_de_ataque"]) == (4, 4)
