@@ -33,7 +33,9 @@ ESTADOS_PEDIDO = (
 # estos literales. buzon_correo, bitacora_efectos y las tablas internas de SQLite no están.
 TABLAS_LEGIBLES = ("clientes", "pedidos", "pagos", "config_ti")
 
-_COLUMNAS_PEDIDO = ("order_id", "customer_id", "estado", "fecha_compra", "fecha_entrega", "valor_total")
+_COLUMNAS_PEDIDO = (
+    "order_id", "customer_id", "estado", "fecha_compra", "fecha_entrega", "valor_total", "comentario",
+)
 _MAX_LARGO_ID = 64
 
 
@@ -49,7 +51,7 @@ class ToolError(Exception):
 # Herramientas
 # ---------------------------------------------------------------------------
 def consultar_pedido(order_id: str) -> dict[str, Any]:
-    """Consulta un pedido y devuelve su estado, cliente, fechas de compra y entrega y valor total.
+    """Consulta un pedido y devuelve su estado, cliente, fechas de compra y entrega, valor total y el comentario del cliente.
 
     order_id: identificador del pedido.
     """

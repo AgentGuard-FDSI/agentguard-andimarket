@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
                       'shipped', 'delivered', 'canceled', 'unavailable')),
     fecha_compra  TEXT NOT NULL,     -- order_purchase_timestamp (ISO 8601)
     fecha_entrega TEXT,              -- order_delivered_customer_date; NULL si no se ha entregado
-    valor_total   REAL NOT NULL      -- suma de olist_order_items (price + freight_value)
+    valor_total   REAL NOT NULL,     -- suma de olist_order_items (price + freight_value)
+    comentario    TEXT               -- comentario del cliente (texto de terceros, NO confiable);
+                                     -- canal de la inyección indirecta del escenario 5
 );
 
 CREATE TABLE IF NOT EXISTS pagos (

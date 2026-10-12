@@ -16,7 +16,7 @@ from ._http import post_json
 from .base import RespuestaModelo
 
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
-MODELO_POR_DEFECTO = "gemini-2.5-flash"
+MODELO_POR_DEFECTO = "gemini-3.8-flash"
 
 
 class ModeloGemini:
