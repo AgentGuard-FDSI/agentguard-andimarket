@@ -14,7 +14,7 @@ from ._http import post_json
 from .base import ModeloError, RespuestaModelo
 
 URL = "https://api.groq.com/openai/v1/chat/completions"
-MODELO_POR_DEFECTO = "llama-3.3-70b-versatile"
+MODELO_POR_DEFECTO = "openai/gpt-oss-120b"
 
 
 class ModeloGroq:

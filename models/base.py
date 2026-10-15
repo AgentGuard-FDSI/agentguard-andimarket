@@ -32,6 +32,9 @@ class ToolCall:
     id: str
     name: str
     input: dict[str, Any]
+    # Firma opaca del razonamiento que algunos proveedores adjuntan a la llamada y exigen recibir
+    # de vuelta en el turno siguiente (Gemini 3: thoughtSignature). Los demás backends la ignoran.
+    firma: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,8 @@ def mensaje_asistente(respuesta: RespuestaModelo) -> dict[str, Any]:
         "role": "assistant",
         "content": respuesta.texto,
         "tool_calls": [
-            {"id": tc.id, "name": tc.name, "input": tc.input} for tc in respuesta.tool_calls
+            {"id": tc.id, "name": tc.name, "input": tc.input, **({"firma": tc.firma} if tc.firma else {})}
+            for tc in respuesta.tool_calls
         ]
         or None,
     }

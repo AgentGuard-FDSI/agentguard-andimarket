@@ -30,7 +30,8 @@ from andimarket import auditoria
 from andimarket.agent.loop import AgentResult, run_agent
 from andimarket.config_a import preparar_bases, veredicto_de
 from andimarket.criterio import Veredicto
-from andimarket.prompts import PROMPTS, Prompt
+from andimarket.modelos import MODELOS, crear_modelo, nombre_de
+from andimarket.prompts import INSTRUCCIONES_AGENTE, PROMPTS, Prompt
 from andimarket.run_id import nuevo_run_id
 from andimarket.toolbox import RegistryToolbox
 from andimarket.toolbox_guard import GuardedToolbox
@@ -81,12 +82,12 @@ def run_config_b(
     sesion = prompt.sesion
     toolbox = GuardedToolbox(guard, sesion, approver, RegistryToolbox(), emit)
     with run_context(run_id=run_id, config="B", user_id=sesion.usuario, area=sesion.area):
-        return run_agent(prompt.texto, model or prompt.modelo(), toolbox, sesion, emit)
+        return run_agent(prompt.texto, model or prompt.modelo(), toolbox, sesion, emit, sistema=INSTRUCCIONES_AGENTE)
 
 
 def guardar_evidencia(
     prompt: Prompt, run_id: str, resultado: AgentResult, carpeta: Path, veredicto: Veredicto | None = None,
-    aprobador: str | None = None,
+    aprobador: str | None = None, modelo: str = "guion",
 ) -> Path:
     carpeta.mkdir(parents=True, exist_ok=True)
     ruta = carpeta / f"config_b_{prompt.id}.json"
@@ -96,6 +97,7 @@ def guardar_evidencia(
             {
                 "configuracion": "B",
                 "run_id": run_id,
+                "modelo": modelo,
                 "prompt": prompt.nombre,
                 "es_ataque": prompt.es_ataque,
                 "sesion": vars(prompt.sesion),
@@ -139,6 +141,8 @@ def main() -> None:
     parser.add_argument("--datos", type=Path, default=Path("data"), help="carpeta de las bases SQLite")
     parser.add_argument("--semilla", type=Path, default=db.SEED_TEST, help="SQL con los datos de negocio")
     parser.add_argument("--evidencia", type=Path, default=Path("evidencia"))
+    parser.add_argument("--modelo", choices=MODELOS, default="guion",
+                        help="guion (por defecto, reproducible) o un backend real: gemini, groq, ollama")
     args = parser.parse_args()
 
     guard = crear_guard(args.politica)
@@ -149,11 +153,13 @@ def main() -> None:
         run_id = nuevo_run_id("B", id_prompt)
         preparar_bases(args.datos, args.semilla)
         print(f"\n{'=' * 70}\nCONFIG B - {prompt.nombre} (run_id {run_id})\n{'=' * 70}")
-        resultado = run_config_b(prompt, guard, crear_aprobador(args.aprobador), run_id)
+        modelo = crear_modelo(args.modelo, prompt)
+        print(f"[modelo] {nombre_de(modelo)}")
+        resultado = run_config_b(prompt, guard, crear_aprobador(args.aprobador), run_id, model=modelo)
         veredicto = veredicto_de(prompt, run_id)
         if veredicto:
             print(f"[veredicto] {'ATAQUE EXITOSO' if veredicto.exitoso else 'ataque contenido'}: {veredicto.motivo}")
-        ruta = guardar_evidencia(prompt, run_id, resultado, args.evidencia, veredicto, args.aprobador)
+        ruta = guardar_evidencia(prompt, run_id, resultado, args.evidencia, veredicto, args.aprobador, nombre_de(modelo))
         print(f"[evidencia] {ruta}")
 
 

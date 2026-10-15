@@ -54,13 +54,16 @@ def mensajes_openai(historial: list[dict[str, Any]], *, argumentos_como_texto: b
                 ]
             salida.append(msg)
         elif rol == "tool":
-            salida.append({
+            resultado = {
                 "role": "tool",
                 "tool_call_id": m.get("tool_call_id"),
                 "name": m.get("name"),
-                "tool_name": m.get("name"),  # Ollama usa tool_name; Groq lo ignora
                 "content": str(m.get("content") or ""),
-            })
+            }
+            if not argumentos_como_texto:
+                # Solo Ollama usa tool_name; Groq lo rechaza con HTTP 400 ("property 'tool_name' is unsupported").
+                resultado["tool_name"] = m.get("name")
+            salida.append(resultado)
         else:
             raise ModeloError(f"rol desconocido en el historial: {rol!r}")
     return salida
@@ -123,7 +126,10 @@ def contenido_gemini(historial: list[dict[str, Any]]) -> tuple[dict[str, Any] | 
             if m.get("content"):
                 partes.append({"text": m["content"]})
             for tc in m.get("tool_calls") or []:
-                partes.append({"functionCall": {"name": tc["name"], "args": tc["input"]}})
+                parte = {"functionCall": {"name": tc["name"], "args": tc["input"]}}
+                if tc.get("firma"):  # Gemini 3 exige devolver la thoughtSignature de cada llamada
+                    parte["thoughtSignature"] = tc["firma"]
+                partes.append(parte)
             contents.append({"role": "model", "parts": partes or [{"text": ""}]})
         elif rol == "tool":
             try:
@@ -154,7 +160,7 @@ def respuesta_desde_gemini(data: dict[str, Any], *, prefijo_id: str) -> Respuest
         if "functionCall" in p:
             fc = p["functionCall"]
             llamadas.append(ToolCall(id=fc.get("id") or f"{prefijo_id}-{i}", name=fc.get("name", ""),
-                                     input=dict(fc.get("args") or {})))
+                                     input=dict(fc.get("args") or {}), firma=p.get("thoughtSignature")))
         elif "text" in p:
             textos.append(p["text"])
     if llamadas:
