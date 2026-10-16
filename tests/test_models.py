@@ -139,6 +139,8 @@ def test_formato_openai_groq_y_ollama():
     assert groq[2]["tool_calls"][0]["function"]["arguments"] == '{"order_id": "123"}'
     assert ollama[2]["tool_calls"][0]["function"]["arguments"] == {"order_id": "123"}
     assert groq[3]["tool_call_id"] == "c1"
+    # Groq rechaza (HTTP 400) el campo tool_name en los mensajes de herramienta; Ollama lo usa.
+    assert "tool_name" not in groq[3] and ollama[3]["tool_name"] == "consultar_pedido"
     tools = _formatos.tools_openai(TOOL_DEFINITIONS)
     assert {t["function"]["name"] for t in tools} == {d["name"] for d in TOOL_DEFINITIONS}
 
@@ -223,3 +225,27 @@ def test_http_no_reintenta_401(monkeypatch):
 
 def test_modulo_exporta_la_interfaz():
     assert set(models.__all__) >= {"get_model", "Modelo", "RespuestaModelo", "ToolCall", "ModeloError"}
+
+
+def test_gemini_devuelve_la_firma_del_razonamiento():
+    """Gemini 3 rechaza (HTTP 400) un historial cuyas functionCall no traen su thoughtSignature."""
+    data = {"candidates": [{"content": {"parts": [{"functionCall": {"name": "consultar_pedido",
+                                                                    "args": {"order_id": "123"}},
+                                                   "thoughtSignature": "firma-opaca"}]}}]}
+    respuesta = _formatos.respuesta_desde_gemini(data, prefijo_id="g")
+    assert respuesta.tool_calls[0].firma == "firma-opaca"
+
+    historial = [mensaje_usuario("Consulta el pedido 123"), mensaje_asistente(respuesta),
+                 mensaje_tool_result("g-1", "consultar_pedido", '{"ok": true}')]
+    _, contents = _formatos.contenido_gemini(historial)
+    assert contents[1]["parts"][0]["thoughtSignature"] == "firma-opaca"
+
+    # Los formatos tipo OpenAI (Groq, Ollama) no la envían.
+    mensajes = _formatos.mensajes_openai(historial, argumentos_como_texto=True)
+    assert "firma" not in json.dumps(mensajes)
+
+
+def test_llamada_sin_firma_no_agrega_el_campo():
+    historial = [mensaje_asistente(RespuestaModelo(tool_calls=(ToolCall("c1", "consultar_pedido", {"order_id": "1"}),)))]
+    _, contents = _formatos.contenido_gemini(historial)
+    assert "thoughtSignature" not in contents[0]["parts"][0]
