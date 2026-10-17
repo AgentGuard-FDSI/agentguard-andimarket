@@ -177,14 +177,14 @@ def test_comparar_con_el_modelo_de_guion(comparar, tmp_path):
     )
     assert m["errores"] == 0
     assert (m["A"]["ataques_exitosos"], m["A"]["intentos_de_ataque"]) == (8, 8)
-    assert (m["B"]["ataques_exitosos"], m["B"]["intentos_de_ataque"]) == (2, 8)  # datos: Avance 3
-    assert m["B"]["tasa_contencion"] == 0.75
+    assert (m["B"]["ataques_exitosos"], m["B"]["intentos_de_ataque"]) == (0, 8)  # con las restricciones por argumento
+    assert m["B"]["tasa_contencion"] == 1.0
     assert (m["B"]["falsos_positivos"], m["B"]["friccion"]) == (0.0, 0.0)
     assert m["B"]["tasa_no_autorizadas_desviacion"] == 0.0
     assert m["latencia_authorize_ms"]["llamadas"] == sum(m["B"]["decisiones"].values())
     datos = json.loads(ruta_json.read_text(encoding="utf-8"))
     assert len(datos["corridas"]) == 2 * 5 * 2 and len({c["run_id"] for c in datos["corridas"]}) == 20
-    assert "| Tasa de contención | 0 % | 75 % |" in ruta_md.read_text(encoding="utf-8")
+    assert "| Tasa de contención | 0 % | 100 % |" in ruta_md.read_text(encoding="utf-8")
 
 
 def test_comparar_reporta_errores_del_modelo_sin_contarlos(comparar, tmp_path, monkeypatch):
