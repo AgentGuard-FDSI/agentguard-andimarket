@@ -99,7 +99,12 @@ def run_config_b(
                 return AgentResult(veredicto.message or RECHAZO_POR_DEFECTO)
             emit("[agentguard] verificador de entrada: PASS")
 
-        aprobador = ValidatingApprover(c.aprobaciones, approver, run_id=run_id)
+        # Un aprobador que ya aplica la separación de funciones con la cola HITL (el de la API web,
+        # andimarket/api/ejecuciones.py) se usa tal cual; cualquier otro se envuelve en ValidatingApprover.
+        aprobador = (
+            approver if getattr(approver, "aplica_separacion_de_funciones", False)
+            else ValidatingApprover(c.aprobaciones, approver, run_id=run_id)
+        )
         toolbox = GuardedToolbox(
             c.guard, sesion, aprobador, RegistryToolbox(), emit,
             run_id=run_id, entre_areas=c.entre_areas, cadena=c.cadena,
@@ -125,13 +130,49 @@ def capa_contencion(run_id: str, veredicto: Veredicto | None) -> str | None:
     return "modelo"
 
 
+def resumen_corrida(run_id: str, resultado: AgentResult, controles: ControlesB | None = None) -> dict:
+    """Lo que hizo una corrida: verificador de entrada, decisiones de AgentGuard, avisos, herramientas y
+    respuesta. Lo usan la evidencia en JSON y la API del frontend (sirve también para la Config. A, que
+    no tiene verificador ni decisiones)."""
+    return {
+        "verificador_entrada": [
+            {
+                "accion": e["accion"],
+                "temas": json.loads(e["temas_json"]),
+                "reglas": json.loads(e["reglas_json"]),
+                "motivo": e["motivo"],
+                "notificado": bool(e["notificado"]),
+            }
+            for e in auditoria.entradas_de(run_id)
+        ],
+        "decisiones_agentguard": [
+            {
+                "herramienta": d["tool"],
+                "argumentos": json.loads(d["args_json"]),
+                "decision": d["decision"],
+                "regla": d["regla"],
+                "motivo": d["motivo"],
+                "aprobado": None if d["aprobado"] is None else bool(d["aprobado"]),
+                "aprobador": d["aprobador"],
+                "autorizada": bool(d["autorizada"]),
+            }
+            for d in auditoria.decisiones_de(run_id)
+        ],
+        "avisos": controles.avisos_de(run_id) if controles is not None else [],
+        "herramientas_solicitadas": [
+            {"herramienta": r.name, "argumentos": r.arguments, "resultado": r.result}
+            for r in resultado.trace
+        ],
+        "respuesta_final": resultado.final_text,
+    }
+
+
 def guardar_evidencia(
     prompt: Prompt, run_id: str, resultado: AgentResult, carpeta: Path, veredicto: Veredicto | None = None,
     aprobador: str | None = None, modelo: str = "guion", controles: ControlesB | None = None,
 ) -> Path:
     carpeta.mkdir(parents=True, exist_ok=True)
     ruta = carpeta / f"config_b_{prompt.id}.json"
-    decisiones = auditoria.decisiones_de(run_id)
     ruta.write_text(
         json.dumps(
             {
@@ -147,35 +188,7 @@ def guardar_evidencia(
                 "ataque_exitoso": veredicto.exitoso if veredicto else None,
                 "motivo": veredicto.motivo if veredicto else None,
                 "capa_contencion": capa_contencion(run_id, veredicto),
-                "verificador_entrada": [
-                    {
-                        "accion": e["accion"],
-                        "temas": json.loads(e["temas_json"]),
-                        "reglas": json.loads(e["reglas_json"]),
-                        "motivo": e["motivo"],
-                        "notificado": bool(e["notificado"]),
-                    }
-                    for e in auditoria.entradas_de(run_id)
-                ],
-                "decisiones_agentguard": [
-                    {
-                        "herramienta": d["tool"],
-                        "argumentos": json.loads(d["args_json"]),
-                        "decision": d["decision"],
-                        "regla": d["regla"],
-                        "motivo": d["motivo"],
-                        "aprobado": None if d["aprobado"] is None else bool(d["aprobado"]),
-                        "aprobador": d["aprobador"],
-                        "autorizada": bool(d["autorizada"]),
-                    }
-                    for d in decisiones
-                ],
-                "avisos": controles.avisos_de(run_id) if controles is not None else [],
-                "herramientas_solicitadas": [
-                    {"herramienta": r.name, "argumentos": r.arguments, "resultado": r.result}
-                    for r in resultado.trace
-                ],
-                "respuesta_final": resultado.final_text,
+                **resumen_corrida(run_id, resultado, controles),
             },
             ensure_ascii=False,
             indent=2,

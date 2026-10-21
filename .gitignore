@@ -5,6 +5,9 @@ venv/
 .env
 *.log
 *.db
+*.db-journal
 data/raw/
 .pytest_cache/
 .DS_Store
+# Bases y resultados que genera la API (laboratorio de comparación y experimento).
+data/api/
