@@ -177,16 +177,6 @@ Seguridad).
 
     python -m andimarket.api
 
-Todos los usuarios de demostración entran con la clave `demo2026`. Para usar otra, ponla en el `.env`
-(`ANDIMARKET_CLAVE_DEMO=...`, ver `.env.example`) o en la consola antes de arrancar. La clave por defecto
-solo sirve mientras la API escuche en este equipo (`--host 127.0.0.1`, el valor por defecto); con otro
-`--host` la API no arranca sin una clave propia. Queda en
-`http://127.0.0.1:8000`; la documentación interactiva (para probar cada endpoint) está en
-`http://127.0.0.1:8000/docs`.
-
-Opciones: `--puerto`, `--modelo` (modelo del chat: `simulado` por defecto, o `gemini`, `groq`, `ollama`),
-`--espera-hitl` (segundos que una acción HITL espera al aprobador; 120 por defecto) y `--politica`.
-
 **Sesión.** `POST /api/login` con `{"usuario", "clave"}` devuelve un token; los demás endpoints lo piden
 en `Authorization: Bearer <token>`. Los usuarios son los de `andimarket/directorio.py` y todos usan la
 misma clave de demostración. La identidad (área y nivel) sale del directorio, nunca del cuerpo de la
