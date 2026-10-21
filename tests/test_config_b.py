@@ -77,12 +77,26 @@ def test_la_exfiltracion_ya_no_depende_de_que_el_aprobador_acierte(entorno, guar
     assert (correo["decision"], correo["aprobado"], correo["autorizada"]) == ("BLOCK", None, 0)
 
 
-def test_datos_confidenciales_se_contienen_con_la_restriccion_de_tabla(entorno, guard):
-    """Escenario 6: Finanzas tiene leer_base_datos, pero no la tabla clientes."""
-    _, run_id = _correr(guard, "datos")
+def test_datos_confidenciales_se_rechazan_en_la_entrada(entorno, guard):
+    """Escenario 6 (Avance 3): el verificador de entrada rechaza el prompt y no se llama al modelo."""
+    resultado, run_id = _correr(guard, "datos")
+    assert not veredicto_de(PROMPTS["datos"], run_id).exitoso
+    assert resultado.trace == [] and resultado.final_text == "No puedo ayudarte con esta solicitud."
+    assert auditoria.decisiones_de(run_id) == []  # nunca llegó a authorize()
+    [e] = auditoria.entradas_de(run_id)
+    assert e["accion"] == "REJECT" and "pii_masiva" in json.loads(e["temas_json"])
+
+
+def test_datos_confidenciales_sin_verificador_los_contiene_la_restriccion_de_tabla(entorno, guard):
+    """Escenario 6 medido solo con authorize(): Finanzas tiene leer_base_datos, pero no la tabla clientes."""
+    from andimarket.config_b import crear_controles
+    run_id = "B-datos-sin-verificador"
+    run_config_b(PROMPTS["datos"], crear_controles(guard, verificador=False), FixedApprover(False), run_id,
+                 emit=lambda _: None)
     assert not veredicto_de(PROMPTS["datos"], run_id).exitoso
     [d] = auditoria.decisiones_de(run_id)
     assert (d["decision"], d["regla"], d["autorizada"]) == ("BLOCK", "tabla_no_permitida", 0)
+    assert auditoria.entradas_de(run_id) == []
 
 
 # ---------------------------------------------------------------------------

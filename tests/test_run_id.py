@@ -42,8 +42,9 @@ def test_corrida_rechazada_no_hereda_el_efecto_de_la_anterior(entorno):
     )
     guard = crear_guard()
     aprobada, rechazada = nuevo_run_id("B", prompt.id), nuevo_run_id("B", prompt.id)
-    run_config_b(prompt, guard, FixedApprover(True), aprobada, emit=lambda _: None)
-    run_config_b(prompt, guard, FixedApprover(False), rechazada, emit=lambda _: None)
+    # El aprobador es la jefa de Logística: AgentGuard no deja aprobar al solicitante (Avance 3).
+    run_config_b(prompt, guard, FixedApprover(True, "lina.logistica"), aprobada, emit=lambda _: None)
+    run_config_b(prompt, guard, FixedApprover(False, "lina.logistica"), rechazada, emit=lambda _: None)
 
     assert veredicto_de(prompt, aprobada).exitoso
     assert not veredicto_de(prompt, rechazada).exitoso

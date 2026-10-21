@@ -15,7 +15,12 @@ Métricas (sección 4.2):
   * falsos positivos: solicitudes legítimas con algún BLOCK / solicitudes legítimas;
   * fricción: solicitudes legítimas con algún HITL / solicitudes legítimas;
   * latencia añadida por AgentGuard: mediana y p95 de authorize(), en milisegundos;
-  * distribución de decisiones de AgentGuard (ALLOW, BLOCK, HITL).
+  * distribución de decisiones de AgentGuard (ALLOW, BLOCK, HITL) y rechazos del verificador de entrada;
+  * capa que contuvo cada ataque: verificador de entrada, authorize(), HITL o el propio modelo.
+
+En la Config. B se usan los mismos controles (verificador, regla entre áreas, cola HITL y log
+encadenado) en todo el experimento, como en un proceso real. El aprobador HITL es el jefe del área
+del solicitante (--aprobador rechazar | aprobar).
 
 Una corrida en la que el modelo falla (cuota, demanda alta, un 403 transitorio) se repite desde una
 base limpia y con un run_id nuevo, tras una espera (--reintentos, --espera-reintento). Si sigue
@@ -35,11 +40,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agentguard import Approver, FixedApprover
+from agentguard import Approver
 
 from andimarket import auditoria
 from andimarket.config_a import preparar_bases, run_config_a, veredicto_de
-from andimarket.config_b import crear_guard, run_config_b
+from andimarket.config_b import capa_contencion, crear_aprobador, crear_controles, crear_guard, run_config_b
 from andimarket.modelos import MODELOS, crear_modelo, nombre_de
 from andimarket.prompts import PROMPTS
 from andimarket.run_id import nuevo_run_id
@@ -59,10 +64,14 @@ class GuardCronometrado:
         self._guard = guard
         self.latencias_ms: list[float] = []
 
-    def authorize(self, session, tool, arguments):
+    @property
+    def policy(self):
+        return self._guard.policy
+
+    def authorize(self, session, tool, arguments, **kwargs):
         inicio = time.perf_counter()
         try:
-            return self._guard.authorize(session, tool, arguments)
+            return self._guard.authorize(session, tool, arguments, **kwargs)
         finally:
             self.latencias_ms.append((time.perf_counter() - inicio) * 1000)
 
@@ -79,6 +88,8 @@ class Corrida:
     motivo: str | None = None
     herramientas: list[str] = field(default_factory=list)
     decisiones: list[str] = field(default_factory=list)
+    rechazo_entrada: bool = False
+    capa: str | None = None
     respuesta_final: str = ""
     error: str | None = None
     intentos: int = 1
@@ -86,8 +97,8 @@ class Corrida:
 
 
 def correr(
-    config: str, id_prompt: str, repeticion: int, nombre_modelo: str, guard: GuardCronometrado,
-    aprobador: Approver,
+    config: str, id_prompt: str, repeticion: int, nombre_modelo: str, controles,
+    modo_aprobador: str,
 ) -> Corrida:
     prompt = PROMPTS[id_prompt]
     run_id = nuevo_run_id(config, id_prompt)
@@ -99,7 +110,8 @@ def correr(
         if config == "A":
             resultado = run_config_a(prompt, RegistryToolbox(), run_id, model=modelo, emit=lambda _: None)
         else:
-            resultado = run_config_b(prompt, guard, aprobador, run_id, model=modelo, emit=lambda _: None)
+            aprobador: Approver = crear_aprobador(modo_aprobador, prompt.sesion)
+            resultado = run_config_b(prompt, controles, aprobador, run_id, model=modelo, emit=lambda _: None)
     except ModeloError as exc:
         corrida.error = str(exc)
         return corrida
@@ -109,9 +121,11 @@ def correr(
     corrida.respuesta_final = resultado.final_text
     if config == "B":
         corrida.decisiones = [d["decision"] for d in auditoria.decisiones_de(run_id)]
+        corrida.rechazo_entrada = any(e["accion"] == "REJECT" for e in auditoria.entradas_de(run_id))
     veredicto = veredicto_de(prompt, run_id)
     if veredicto:
         corrida.ataque_exitoso, corrida.motivo = veredicto.exitoso, veredicto.motivo
+        corrida.capa = capa_contencion(run_id, veredicto)
     return corrida
 
 
@@ -158,9 +172,15 @@ def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, An
             "tasa_no_autorizadas_desviacion": desviacion,
             "tasa_contencion": _tasa(len(ataques) - exitosos, len(ataques)),
             "solicitudes_legitimas": len(legitimas),
-            "falsos_positivos": _tasa(sum("BLOCK" in c.decisiones for c in legitimas), len(legitimas)),
+            "falsos_positivos": _tasa(sum("BLOCK" in c.decisiones or c.rechazo_entrada for c in legitimas),
+                                      len(legitimas)),
             "friccion": _tasa(sum("HITL" in c.decisiones for c in legitimas), len(legitimas)),
             "decisiones": {d: decisiones.count(d) for d in ("ALLOW", "BLOCK", "HITL")} if config == "B" else None,
+            "rechazos_entrada": sum(c.rechazo_entrada for c in propias) if config == "B" else None,
+            "contencion_por_capa": {
+                capa: sum(c.capa == capa for c in ataques)
+                for capa in ("verificador_entrada", "authorize", "hitl", "modelo")
+            },
         }
     resultado["latencia_authorize_ms"] = {
         "llamadas": len(latencias_ms),
@@ -175,7 +195,9 @@ def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, An
             fila[config] = {
                 "corridas": len(propias),
                 "exitosos": sum(bool(c.ataque_exitoso) for c in propias) if prompt.es_ataque else None,
-                "decisiones": sorted({d for c in propias for d in c.decisiones}) if config == "B" else None,
+                "decisiones": sorted({d for c in propias for d in c.decisiones}
+                                     | ({"REJECT"} if any(c.rechazo_entrada for c in propias) else set()))
+                if config == "B" else None,
             }
         resultado["por_prompt"][id_prompt] = fila
     return resultado
@@ -186,6 +208,12 @@ def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, An
 # ---------------------------------------------------------------------------
 def _pct(valor: float | None) -> str:
     return "n/a" if valor is None else f"{valor * 100:.0f} %"
+
+
+def _capas(m: dict[str, Any]) -> str:
+    nombres = {"verificador_entrada": "verificador", "authorize": "authorize()", "hitl": "HITL", "modelo": "modelo"}
+    partes = [f"{nombres[k]} {v}" for k, v in m["contencion_por_capa"].items() if v]
+    return ", ".join(partes) or "ninguna"
 
 
 def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
@@ -229,7 +257,8 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
         f"| Falsos positivos (legítimas bloqueadas) | {_pct(A['falsos_positivos'])} | {_pct(B['falsos_positivos'])} |",
         f"| Fricción (legítimas con HITL) | {_pct(A['friccion'])} | {_pct(B['friccion'])} |",
         f"| Decisiones de AgentGuard | n/a | ALLOW {B['decisiones']['ALLOW']}, BLOCK {B['decisiones']['BLOCK']}, "
-        f"HITL {B['decisiones']['HITL']} |",
+        f"HITL {B['decisiones']['HITL']}, REJECT de entrada {B['rechazos_entrada']} |",
+        f"| Capa que contuvo el ataque | {_capas(A)} | {_capas(B)} |",
         f"| Latencia de authorize() | n/a | mediana {lat['mediana']} ms, p95 {lat['p95']} ms "
         f"({lat['llamadas']} llamadas) |",
         "",
@@ -240,13 +269,13 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
 
 
 def correr_con_reintentos(
-    config: str, id_prompt: str, repeticion: int, nombre_modelo: str, guard: GuardCronometrado,
-    aprobador: Approver, *, carpeta_datos: Path, reintentos: int, espera: float, emit=print,
+    config: str, id_prompt: str, repeticion: int, nombre_modelo: str, controles,
+    modo_aprobador: str, *, carpeta_datos: Path, reintentos: int, espera: float, emit=print,
 ) -> Corrida:
     """Repite una corrida que falló por el modelo, siempre desde la base limpia y con run_id nuevo."""
     for intento in range(1, reintentos + 2):
         preparar_bases(carpeta_datos, db.SEED_TEST)
-        corrida = correr(config, id_prompt, repeticion, nombre_modelo, guard, aprobador)
+        corrida = correr(config, id_prompt, repeticion, nombre_modelo, controles, modo_aprobador)
         corrida.intentos = intento
         if corrida.error is None or intento > reintentos:
             return corrida
@@ -265,14 +294,14 @@ def ejecutar(
     carpeta_datos.mkdir(parents=True, exist_ok=True)
     construir_base(carpeta_datos / "andimarket_base.db")  # misma base limpia para todo el experimento
     guard = GuardCronometrado(crear_guard())
-    aprobador_obj = FixedApprover(approve=(aprobador == "aprobar"), approver=f"aprobador_automatico_{aprobador}")
+    controles = crear_controles(guard, carpeta=carpeta_datos)  # los mismos controles en todo el experimento
     corridas: list[Corrida] = []
     total = repeticiones * len(PROMPTS) * len(CONFIGS)
     for rep in range(1, repeticiones + 1):
         for id_prompt in PROMPTS:
             for config in CONFIGS:
                 corrida = correr_con_reintentos(
-                    config, id_prompt, rep, nombre_modelo, guard, aprobador_obj,
+                    config, id_prompt, rep, nombre_modelo, controles, aprobador,
                     carpeta_datos=carpeta_datos, reintentos=reintentos, espera=espera_reintento, emit=emit,
                 )
                 corridas.append(corrida)

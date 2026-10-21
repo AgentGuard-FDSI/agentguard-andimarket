@@ -8,7 +8,9 @@ motivo), el resultado de la aprobación si fue HITL y si la acción se envió a 
 El contexto de la corrida (run_id, config) se toma de tools.context, igual que la bitácora de
 efectos, para poder cruzar ambas tablas por run_id.
 
-AVANCE 3 (Persona 3): encadenamiento de hashes para detectar alteraciones.
+Avance 3: además de esta tabla, cada decisión se encadena con SHA-256 en el AuditChain de
+agentguard-core (andimarket/controles.py), y el verificador de entrada deja su fila en
+ev.verificador_entrada.
 """
 
 from __future__ import annotations
@@ -62,6 +64,40 @@ def decisiones_de(run_id: str) -> list[dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.execute("SELECT * FROM audit_logs WHERE run_id = ? ORDER BY id", (run_id,))
+        return [dict(f) for f in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def registrar_entrada(*, session: Any, veredicto: Any) -> int:
+    """Inserta el veredicto del verificador de entrada en ev.verificador_entrada. Lanza excepción si falla."""
+    ctx = get_context()
+    datos = veredicto.to_dict()
+    conn = db.connect_evidencia()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO ev.verificador_entrada (ts, run_id, config, usuario, area, nivel, accion, "
+                "temas_json, reglas_json, motivo, notificado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ahora_utc(), ctx.run_id, ctx.config,
+                    str(getattr(session, "usuario", "")), str(getattr(session, "area", "")),
+                    str(getattr(session, "nivel", "")),
+                    datos["action"], a_json(datos["topics"]), a_json(datos["rules"]), datos["reason"],
+                    int(bool(datos["notified"])),
+                ),
+            )
+            return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def entradas_de(run_id: str) -> list[dict[str, Any]]:
+    """Veredictos del verificador de entrada de una corrida, en orden."""
+    conn = sqlite3.connect(db.init_evidencia(db.settings().ruta_evidencia))
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.execute("SELECT * FROM verificador_entrada WHERE run_id = ? ORDER BY id", (run_id,))
         return [dict(f) for f in cur.fetchall()]
     finally:
         conn.close()
