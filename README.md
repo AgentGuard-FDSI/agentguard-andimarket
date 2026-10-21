@@ -175,11 +175,12 @@ Seguridad).
 
 **Arrancar (Windows):**
 
-    set ANDIMARKET_CLAVE_DEMO=una-clave-para-el-equipo
     python -m andimarket.api
 
-En PowerShell la variable se define con `$env:ANDIMARKET_CLAVE_DEMO="una-clave-para-el-equipo"`. Si no
-se define, la API genera una clave al azar y la imprime en la consola. Queda en
+Todos los usuarios de demostración entran con la clave `demo2026`. Para usar otra, ponla en el `.env`
+(`ANDIMARKET_CLAVE_DEMO=...`, ver `.env.example`) o en la consola antes de arrancar. La clave por defecto
+solo sirve mientras la API escuche en este equipo (`--host 127.0.0.1`, el valor por defecto); con otro
+`--host` la API no arranca sin una clave propia. Queda en
 `http://127.0.0.1:8000`; la documentación interactiva (para probar cada endpoint) está en
 `http://127.0.0.1:8000/docs`.
 

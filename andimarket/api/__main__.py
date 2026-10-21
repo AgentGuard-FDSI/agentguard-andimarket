@@ -1,17 +1,37 @@
 """Arranca la API:  python -m andimarket.api  [--puerto 8000] [--modelo simulado]
 
-La clave de la demostración se toma de ANDIMARKET_CLAVE_DEMO. Si no está definida, se genera una
-al azar y se imprime en la consola (así nunca hay una clave por defecto conocida).
+La clave de la demostración se toma de ANDIMARKET_CLAVE_DEMO (variable de entorno o archivo `.env`).
+Si no está definida y la API escucha solo en este equipo (127.0.0.1, el valor por defecto), se usa la
+clave de demostración local "demo2026". Para exponer la API en la red (--host 0.0.0.0, por ejemplo) hay
+que definir una clave propia: con una clave conocida, la API se niega a arrancar.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import secrets
 from pathlib import Path
 
+from models._config import cargar_dotenv
+
 from andimarket.api.app import ESPERA_HITL_POR_DEFECTO, MODELOS_CHAT, create_app
+
+CLAVE_LOCAL = "demo2026"
+HOSTS_LOCALES = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def clave_demo(host: str) -> str:
+    """La clave de la demostración: ANDIMARKET_CLAVE_DEMO (entorno o .env) o, solo en local, "demo2026"."""
+    cargar_dotenv()
+    clave = os.environ.get("ANDIMARKET_CLAVE_DEMO", "").strip()
+    if clave:
+        return clave
+    if host in HOSTS_LOCALES:
+        return CLAVE_LOCAL
+    raise SystemExit(
+        f"[api] --host {host} expone la API fuera de este equipo: define ANDIMARKET_CLAVE_DEMO "
+        "(en la consola o en .env) con una clave propia antes de arrancar."
+    )
 
 
 def main() -> None:
@@ -28,10 +48,9 @@ def main() -> None:
 
     import uvicorn
 
-    clave = os.environ.get("ANDIMARKET_CLAVE_DEMO")
-    if not clave:
-        clave = secrets.token_urlsafe(9)
-        print(f"[api] ANDIMARKET_CLAVE_DEMO no está definida; clave de esta sesión: {clave}")
+    clave = clave_demo(args.host)
+    if clave == CLAVE_LOCAL:
+        print(f"[api] clave de demostración local: {CLAVE_LOCAL} (cámbiala con ANDIMARKET_CLAVE_DEMO en .env)")
     app = create_app(datos=args.datos, politica=args.politica, clave=clave, modelo_chat=args.modelo,
                      espera_hitl=args.espera_hitl)
     print(f"[api] política: {app.state.servidor.ruta_politica}")

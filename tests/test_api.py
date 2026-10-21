@@ -315,3 +315,37 @@ def test_resultados_guardados(api, tmp_path):
 def test_reiniciar_solo_ti_o_gerencia(api):
     assert api.post("/api/demo/reiniciar", headers=entrar(api, "ana.atencion")).status_code == 403
     assert api.post("/api/demo/reiniciar", headers=entrar(api, "tomas.ti")).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Clave de la demostración al arrancar (python -m andimarket.api)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def sin_dotenv(monkeypatch):
+    """Que clave_demo() no lea el .env real del equipo ni herede la variable de la terminal."""
+    import models._config as config
+
+    monkeypatch.setattr(config, "_cargado", True)
+    monkeypatch.delenv("ANDIMARKET_CLAVE_DEMO", raising=False)
+
+
+def test_clave_demo_por_defecto_en_local(sin_dotenv):
+    from andimarket.api.__main__ import CLAVE_LOCAL, clave_demo
+
+    assert clave_demo("127.0.0.1") == CLAVE_LOCAL == "demo2026"
+    assert clave_demo("localhost") == CLAVE_LOCAL
+
+
+def test_clave_demo_de_la_variable(sin_dotenv, monkeypatch):
+    from andimarket.api.__main__ import clave_demo
+
+    monkeypatch.setenv("ANDIMARKET_CLAVE_DEMO", "otra-clave")
+    assert clave_demo("127.0.0.1") == "otra-clave"
+    assert clave_demo("0.0.0.0") == "otra-clave"
+
+
+def test_clave_demo_exige_clave_propia_fuera_de_local(sin_dotenv):
+    from andimarket.api.__main__ import clave_demo
+
+    with pytest.raises(SystemExit, match="ANDIMARKET_CLAVE_DEMO"):
+        clave_demo("0.0.0.0")
