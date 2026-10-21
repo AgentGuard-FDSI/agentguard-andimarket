@@ -1,8 +1,18 @@
 """Experimento comparativo: los mismos prompts en la Config. A y en la Config. B, con el mismo modelo.
 
 Uso:
-    python -m andimarket.comparar --modelo gemini --repeticiones 3
-    python -m andimarket.comparar --modelo guion --repeticiones 1        (sin red, reproducible)
+    python -m andimarket.comparar --conjunto escenarios --modelo groq --repeticiones 3
+    python -m andimarket.comparar --conjunto escenarios --modelo guion   (sin red, reproducible)
+    python -m andimarket.comparar --modelo guion --repeticiones 1        (los 5 prompts de la demo)
+
+Conjuntos (--conjunto):
+  * demo (por defecto): los cinco prompts de andimarket/prompts.py, los mismos de la API y el frontend.
+  * escenarios: el experimento formal (sección 4.1), escenarios 1 a 6 con 5 variantes por categoría de
+    ataque y 10 solicitudes legítimas (andimarket/escenarios.py).
+
+Cuota gratuita (sección 4.4): cada corrida se guarda apenas termina en
+evidencia/corridas_<...>.jsonl; si la cuota se agota a mitad de camino, --reanudar continúa sin
+repetir las corridas ya hechas. La temperatura se fija con --temperatura (por defecto 0) y se reporta.
 
 Cada corrida parte de la misma base limpia (reset_db) y tiene su propio run_id. El resultado de cada
 ataque lo decide el criterio de éxito sobre la bitácora de efectos (sección 4.3), no lo que diga el
@@ -16,11 +26,15 @@ Métricas (sección 4.2):
   * fricción: solicitudes legítimas con algún HITL / solicitudes legítimas;
   * latencia añadida por AgentGuard: mediana y p95 de authorize(), en milisegundos;
   * distribución de decisiones de AgentGuard (ALLOW, BLOCK, HITL) y rechazos del verificador de entrada;
-  * capa que contuvo cada ataque: verificador de entrada, authorize(), HITL o el propio modelo.
+  * capa que contuvo cada ataque: verificador de entrada, authorize(), HITL o el propio modelo;
+  * solicitudes legítimas completadas: su efecto quedó en la bitácora (conjunto escenarios).
 
 En la Config. B se usan los mismos controles (verificador, regla entre áreas, cola HITL y log
 encadenado) en todo el experimento, como en un proceso real. El aprobador HITL es el jefe del área
-del solicitante (--aprobador rechazar | aprobar).
+del solicitante (--aprobador auto | rechazar | aprobar). Con "auto" (por defecto en escenarios) el
+jefe aprueba lo legítimo y rechaza los ataques, como un aprobador atento; así el escenario 4 se
+completa en la Config. B. --sin-verificador mide la Config. B sin el verificador de entrada (para
+reportar en qué capa se contiene el escenario 6 cuando el verificador no está).
 
 Una corrida en la que el modelo falla (cuota, demanda alta, un 403 transitorio) se repite desde una
 base limpia y con un run_id nuevo, tras una espera (--reintentos, --espera-reintento). Si sigue
@@ -45,6 +59,8 @@ from agentguard import Approver
 from andimarket import auditoria
 from andimarket.config_a import preparar_bases, run_config_a, veredicto_de
 from andimarket.config_b import capa_contencion, crear_aprobador, crear_controles, crear_guard, run_config_b
+from andimarket.criterio import herramienta_ejecutada
+from andimarket.escenarios import ESCENARIOS, VARIANTES
 from andimarket.modelos import MODELOS, crear_modelo, nombre_de
 from andimarket.prompts import PROMPTS
 from andimarket.run_id import nuevo_run_id
@@ -55,6 +71,9 @@ from tools import db
 
 CONFIGS = ("A", "B")
 REMOTOS = {"gemini", "groq", "ollama"}
+CONJUNTOS = {"demo": PROMPTS, "escenarios": VARIANTES}
+MODOS_APROBADOR = ("auto", "rechazar", "aprobar")
+CAPAS = ("verificador_entrada", "authorize", "hitl", "modelo")
 
 
 class GuardCronometrado:
@@ -84,7 +103,9 @@ class Corrida:
     run_id: str
     modelo: str
     es_ataque: bool
+    escenario: int | None = None
     ataque_exitoso: bool | None = None
+    legitima_completada: bool | None = None
     motivo: str | None = None
     herramientas: list[str] = field(default_factory=list)
     decisiones: list[str] = field(default_factory=list)
@@ -94,15 +115,22 @@ class Corrida:
     error: str | None = None
     intentos: int = 1
     segundos: float = 0.0
+    latencias_ms: list[float] = field(default_factory=list)
 
 
 def correr(
     config: str, id_prompt: str, repeticion: int, nombre_modelo: str, controles,
-    modo_aprobador: str,
+    modo_aprobador: str, conjunto: str = "demo",
 ) -> Corrida:
-    prompt = PROMPTS[id_prompt]
+    prompt = CONJUNTOS[conjunto][id_prompt]
     run_id = nuevo_run_id(config, id_prompt)
-    corrida = Corrida(config, id_prompt, repeticion, run_id, nombre_modelo, prompt.es_ataque)
+    corrida = Corrida(config, id_prompt, repeticion, run_id, nombre_modelo, prompt.es_ataque, prompt.escenario)
+    if modo_aprobador == "auto":
+        modo_aprobador = "rechazar" if prompt.es_ataque else "aprobar"
+    if hasattr(prompt, "preparar_base"):
+        prompt.preparar_base()  # p. ej. el comentario inyectado de la variante (escenario 5)
+    latencias = getattr(getattr(controles, "guard", None), "latencias_ms", None)
+    previas = len(latencias) if latencias is not None else 0
     inicio = time.perf_counter()
     try:
         modelo = crear_modelo(nombre_modelo, prompt)
@@ -117,6 +145,8 @@ def correr(
         return corrida
     finally:
         corrida.segundos = round(time.perf_counter() - inicio, 3)
+        if latencias is not None:
+            corrida.latencias_ms = [round(x, 4) for x in latencias[previas:]]
     corrida.herramientas = [r.name for r in resultado.trace]
     corrida.respuesta_final = resultado.final_text
     if config == "B":
@@ -126,6 +156,9 @@ def correr(
     if veredicto:
         corrida.ataque_exitoso, corrida.motivo = veredicto.exitoso, veredicto.motivo
         corrida.capa = capa_contencion(run_id, veredicto)
+    efecto = getattr(prompt, "efecto_esperado", None)
+    if efecto:
+        corrida.legitima_completada = herramienta_ejecutada(run_id, efecto)
     return corrida
 
 
@@ -150,7 +183,12 @@ def _percentil(valores: list[float], p: float) -> float | None:
     return round(ordenados[min(len(ordenados) - 1, int(round(p * (len(ordenados) - 1))))], 4)
 
 
-def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, Any]:
+def metricas(
+    corridas: list[Corrida], latencias_ms: list[float] | None = None, prompts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    prompts = PROMPTS if prompts is None else prompts
+    if latencias_ms is None:
+        latencias_ms = [x for c in corridas if c.error is None for x in c.latencias_ms]
     validas = [c for c in corridas if c.error is None]
     resultado: dict[str, Any] = {"errores": len(corridas) - len(validas)}
     for config in CONFIGS:
@@ -175,6 +213,10 @@ def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, An
             "falsos_positivos": _tasa(sum("BLOCK" in c.decisiones or c.rechazo_entrada for c in legitimas),
                                       len(legitimas)),
             "friccion": _tasa(sum("HITL" in c.decisiones for c in legitimas), len(legitimas)),
+            "legitimas_completadas": _tasa(
+                sum(bool(c.legitima_completada) for c in legitimas if c.legitima_completada is not None),
+                sum(c.legitima_completada is not None for c in legitimas),
+            ),
             "decisiones": {d: decisiones.count(d) for d in ("ALLOW", "BLOCK", "HITL")} if config == "B" else None,
             "rechazos_entrada": sum(c.rechazo_entrada for c in propias) if config == "B" else None,
             "contencion_por_capa": {
@@ -187,14 +229,31 @@ def metricas(corridas: list[Corrida], latencias_ms: list[float]) -> dict[str, An
         "mediana": round(statistics.median(latencias_ms), 4) if latencias_ms else None,
         "p95": _percentil(latencias_ms, 0.95),
     }
+    resultado["por_escenario"] = {}
+    for escenario in sorted({c.escenario for c in validas if c.escenario is not None}):
+        de_escenario = [c for c in validas if c.escenario == escenario]
+        es_ataque = any(c.es_ataque for c in de_escenario)
+        fila_e: dict[str, Any] = {"nombre": ESCENARIOS.get(escenario, str(escenario)), "es_ataque": es_ataque}
+        for config in CONFIGS:
+            propias = [c for c in de_escenario if c.config == config]
+            fila_e[config] = {
+                "corridas": len(propias),
+                "exitosos": sum(bool(c.ataque_exitoso) for c in propias) if es_ataque else None,
+                "completadas": None if es_ataque else sum(bool(c.legitima_completada) for c in propias),
+                "contencion_por_capa": {capa: sum(c.capa == capa for c in propias) for capa in CAPAS}
+                if es_ataque else None,
+            }
+        resultado["por_escenario"][str(escenario)] = fila_e
     resultado["por_prompt"] = {}
-    for id_prompt, prompt in PROMPTS.items():
-        fila: dict[str, Any] = {"nombre": prompt.nombre, "es_ataque": prompt.es_ataque}
+    for id_prompt, prompt in prompts.items():
+        fila: dict[str, Any] = {"nombre": prompt.nombre, "es_ataque": prompt.es_ataque,
+                                "escenario": prompt.escenario, "texto": prompt.texto}
         for config in CONFIGS:
             propias = [c for c in validas if c.config == config and c.prompt == id_prompt]
             fila[config] = {
                 "corridas": len(propias),
                 "exitosos": sum(bool(c.ataque_exitoso) for c in propias) if prompt.es_ataque else None,
+                "completadas": None if prompt.es_ataque else sum(bool(c.legitima_completada) for c in propias),
                 "decisiones": sorted({d for c in propias for d in c.decisiones}
                                      | ({"REJECT"} if any(c.rechazo_entrada for c in propias) else set()))
                 if config == "B" else None,
@@ -223,23 +282,48 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
         f"- Fecha: {info['fecha']}",
         f"- Modelo: `{info['modelo']}` (temperatura {info['temperatura']})",
         f"- Repeticiones por prompt y configuración: {info['repeticiones']}",
+        f"- Conjunto: {info.get('conjunto', 'demo')}"
+        + (" (Config. B sin verificador de entrada)" if info.get("verificador") is False else ""),
         f"- Aprobador HITL en la Config. B: {info['aprobador']}",
         f"- Corridas con error del modelo tras reintentar (excluidas de las tasas): {m['errores']}",
         f"- Reintentos por fallas transitorias del modelo: {info['reintentos_usados']}",
         "",
-        "## Resultado por prompt",
+    ]
+    escenarios = info.get("conjunto") == "escenarios"
+    if escenarios and m.get("por_escenario"):
+        lineas += [
+            "## Resultado por escenario (sección 4.1)",
+            "",
+            "| Escenario | Config. A | Config. B | Qué contuvo el ataque en B |",
+            "|---|---|---|---|",
+        ]
+        for num, fila in m["por_escenario"].items():
+            a, b = fila["A"], fila["B"]
+            if fila["es_ataque"]:
+                lineas.append(f"| {num}. {fila['nombre']} | {a['exitosos']}/{a['corridas']} exitosos | "
+                              f"{b['exitosos']}/{b['corridas']} exitosos | {_capas(b)} |")
+            else:
+                lineas.append(f"| {num}. {fila['nombre']} (legítima) | {a['completadas']}/{a['corridas']} completadas | "
+                              f"{b['completadas']}/{b['corridas']} completadas | n/a |")
+        lineas.append("")
+    lineas += [
+        "## Resultado por " + ("variante" if escenarios else "prompt"),
         "",
         "| Prompt | Config. A | Config. B | Decisiones de AgentGuard |",
         "|---|---|---|---|",
     ]
-    for fila in m["por_prompt"].values():
+    for id_prompt, fila in m["por_prompt"].items():
         a, b = fila["A"], fila["B"]
         if fila["es_ataque"]:
             celda_a = f"{a['exitosos']}/{a['corridas']} exitosos"
             celda_b = f"{b['exitosos']}/{b['corridas']} exitosos"
+        elif escenarios and a.get("completadas") is not None:
+            celda_a = f"{a['completadas']}/{a['corridas']} completadas"
+            celda_b = f"{b['completadas']}/{b['corridas']} completadas"
         else:
             celda_a, celda_b = f"{a['corridas']} corridas", f"{b['corridas']} corridas"
-        lineas.append(f"| {fila['nombre']} | {celda_a} | {celda_b} | {', '.join(b['decisiones']) or 'ninguna'} |")
+        nombre = f"`{id_prompt}`: {fila['texto']}" if escenarios else fila["nombre"]
+        lineas.append(f"| {nombre} | {celda_a} | {celda_b} | {', '.join(b['decisiones'] or []) or 'ninguna'} |")
     A, B, lat = m["A"], m["B"], m["latencia_authorize_ms"]
     lineas += [
         "",
@@ -256,6 +340,7 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
         f"| Tasa de contención | {_pct(A['tasa_contencion'])} | {_pct(B['tasa_contencion'])} |",
         f"| Falsos positivos (legítimas bloqueadas) | {_pct(A['falsos_positivos'])} | {_pct(B['falsos_positivos'])} |",
         f"| Fricción (legítimas con HITL) | {_pct(A['friccion'])} | {_pct(B['friccion'])} |",
+        f"| Legítimas completadas | {_pct(A['legitimas_completadas'])} | {_pct(B['legitimas_completadas'])} |",
         f"| Decisiones de AgentGuard | n/a | ALLOW {B['decisiones']['ALLOW']}, BLOCK {B['decisiones']['BLOCK']}, "
         f"HITL {B['decisiones']['HITL']}, REJECT de entrada {B['rechazos_entrada']} |",
         f"| Capa que contuvo el ataque | {_capas(A)} | {_capas(B)} |",
@@ -271,11 +356,12 @@ def tabla_markdown(info: dict[str, Any], m: dict[str, Any]) -> str:
 def correr_con_reintentos(
     config: str, id_prompt: str, repeticion: int, nombre_modelo: str, controles,
     modo_aprobador: str, *, carpeta_datos: Path, reintentos: int, espera: float, emit=print,
+    conjunto: str = "demo",
 ) -> Corrida:
     """Repite una corrida que falló por el modelo, siempre desde la base limpia y con run_id nuevo."""
     for intento in range(1, reintentos + 2):
         preparar_bases(carpeta_datos, db.SEED_TEST)
-        corrida = correr(config, id_prompt, repeticion, nombre_modelo, controles, modo_aprobador)
+        corrida = correr(config, id_prompt, repeticion, nombre_modelo, controles, modo_aprobador, conjunto)
         corrida.intentos = intento
         if corrida.error is None or intento > reintentos:
             return corrida
@@ -284,48 +370,107 @@ def correr_con_reintentos(
     return corrida
 
 
+
+
+def _nombre_archivo(modelo: str, conjunto: str, verificador: bool) -> str:
+    sufijo = ("" if conjunto == "demo" else f"_{conjunto}") + ("" if verificador else "_sin_verificador")
+    return f"{re.sub(r'[^A-Za-z0-9._-]+', '_', modelo)}{sufijo}"
+
+
+def _cargar_corridas(ruta: Path) -> list[Corrida]:
+    """Corridas ya guardadas (una por línea), para --reanudar. Ignora líneas dañadas."""
+    corridas = []
+    if ruta.is_file():
+        for linea in ruta.read_text(encoding="utf-8").splitlines():
+            try:
+                corridas.append(Corrida(**json.loads(linea)))
+            except (ValueError, TypeError):
+                continue
+    return corridas
+
+
+def _estado(corrida: Corrida) -> str:
+    if corrida.error:
+        return f"ERROR: {corrida.error[:80]}"
+    if corrida.es_ataque:
+        return "exitoso" if corrida.ataque_exitoso else f"contenido ({corrida.capa})"
+    if corrida.legitima_completada is None:
+        return "legítima"
+    return "completada" if corrida.legitima_completada else "legítima NO completada"
+
+
 def ejecutar(
     nombre_modelo: str, repeticiones: int, *, carpeta_datos: Path, carpeta_salida: Path,
     aprobador: str = "rechazar", pausa: float = 0.0, reintentos: int = 0, espera_reintento: float = 30.0,
-    emit=print,
+    emit=print, conjunto: str = "demo", verificador: bool = True, reanudar: bool = False,
+    temperatura: float | None = None,
 ) -> tuple[Path, Path, dict[str, Any]]:
+    if conjunto not in CONJUNTOS:
+        raise ValueError(f"conjunto desconocido: {conjunto!r}; válidos: {sorted(CONJUNTOS)}")
+    if aprobador not in MODOS_APROBADOR:
+        raise ValueError(f"aprobador desconocido: {aprobador!r}; válidos: {MODOS_APROBADOR}")
+    if temperatura is not None:
+        os.environ["MODEL_TEMPERATURE"] = str(temperatura)  # la misma en A y en B; se reporta
+    prompts = CONJUNTOS[conjunto]
     # Falla de inmediato si el modelo no se puede crear (p. ej. falta la llave), antes de gastar corridas.
-    crear_modelo(nombre_modelo, PROMPTS["legitimo"])
+    nombre_reportado = nombre_de(crear_modelo(nombre_modelo, next(iter(prompts.values()))))
     carpeta_datos.mkdir(parents=True, exist_ok=True)
+    carpeta_salida.mkdir(parents=True, exist_ok=True)
     construir_base(carpeta_datos / "andimarket_base.db")  # misma base limpia para todo el experimento
     guard = GuardCronometrado(crear_guard())
-    controles = crear_controles(guard, carpeta=carpeta_datos)  # los mismos controles en todo el experimento
-    corridas: list[Corrida] = []
-    total = repeticiones * len(PROMPTS) * len(CONFIGS)
-    for rep in range(1, repeticiones + 1):
-        for id_prompt in PROMPTS:
-            for config in CONFIGS:
-                corrida = correr_con_reintentos(
-                    config, id_prompt, rep, nombre_modelo, controles, aprobador,
-                    carpeta_datos=carpeta_datos, reintentos=reintentos, espera=espera_reintento, emit=emit,
-                )
-                corridas.append(corrida)
-                estado = (
-                    f"ERROR: {corrida.error[:80]}" if corrida.error
-                    else ("exitoso" if corrida.ataque_exitoso else "contenido") if corrida.es_ataque
-                    else "legítima"
-                )
-                emit(f"[{len(corridas)}/{total}] rep {rep} | {config} | {id_prompt:<12} | "
-                     f"{','.join(corrida.herramientas) or '(sin herramientas)'} | {estado}")
-                if pausa and len(corridas) < total:
-                    time.sleep(pausa)
+    # Los mismos controles en todo el experimento (la regla entre áreas acumula entre corridas).
+    controles = crear_controles(guard, carpeta=carpeta_datos, verificador=verificador)
 
-    m = metricas(corridas, guard.latencias_ms)
+    nombre = _nombre_archivo(nombre_reportado, conjunto, verificador)
+    base = carpeta_salida / f"comparacion_{nombre}"
+    ruta_jsonl = carpeta_salida / f"corridas_{nombre}.jsonl"
+    previas = [c for c in _cargar_corridas(ruta_jsonl) if c.error is None] if reanudar else []
+    hechas = {(c.config, c.prompt, c.repeticion) for c in previas}
+    corridas = list(previas)
+    if reanudar:
+        # Se reescribe sin las corridas con error, que se vuelven a intentar.
+        ruta_jsonl.write_text("".join(json.dumps(asdict(c), ensure_ascii=False) + "\n" for c in previas),
+                              encoding="utf-8")
+        if hechas:
+            emit(f"[reanudar] {len(hechas)} corridas ya hechas en {ruta_jsonl.name}; se continúa desde ahí")
+    else:
+        ruta_jsonl.write_text("", encoding="utf-8")
+
+    total = repeticiones * len(prompts) * len(CONFIGS)
+    nuevas = 0
+    try:
+        for rep in range(1, repeticiones + 1):
+            for id_prompt in prompts:
+                for config in CONFIGS:
+                    if (config, id_prompt, rep) in hechas:
+                        continue
+                    if pausa and nuevas:
+                        time.sleep(pausa)
+                    corrida = correr_con_reintentos(
+                        config, id_prompt, rep, nombre_modelo, controles, aprobador,
+                        carpeta_datos=carpeta_datos, reintentos=reintentos, espera=espera_reintento, emit=emit,
+                        conjunto=conjunto,
+                    )
+                    nuevas += 1
+                    corridas.append(corrida)
+                    with ruta_jsonl.open("a", encoding="utf-8") as f:  # se guarda apenas termina
+                        f.write(json.dumps(asdict(corrida), ensure_ascii=False) + "\n")
+                    emit(f"[{len(corridas)}/{total}] rep {rep} | {config} | {id_prompt:<24} | "
+                         f"{','.join(corrida.herramientas) or '(sin herramientas)'} | {_estado(corrida)}")
+    finally:
+        controles.cerrar()
+
+    m = metricas(corridas, prompts=prompts)
     info = {
         "fecha": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "modelo": corridas[0].modelo if corridas else nombre_modelo,
+        "modelo": nombre_reportado,
+        "conjunto": conjunto,
+        "verificador": verificador,
         "temperatura": os.environ.get("MODEL_TEMPERATURE", "0"),
         "repeticiones": repeticiones,
         "aprobador": aprobador,
         "reintentos_usados": sum(c.intentos - 1 for c in corridas),
     }
-    carpeta_salida.mkdir(parents=True, exist_ok=True)
-    base = carpeta_salida / f"comparacion_{re.sub(r'[^A-Za-z0-9._-]+', '_', info['modelo'])}"
     ruta_json, ruta_md = base.with_suffix(".json"), base.with_suffix(".md")
     ruta_json.write_text(
         json.dumps({**info, "metricas": m, "corridas": [asdict(c) for c in corridas]}, ensure_ascii=False, indent=2),
@@ -337,10 +482,19 @@ def ejecutar(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compara la Config. A y la Config. B con el mismo modelo.")
+    parser.add_argument("--conjunto", choices=sorted(CONJUNTOS), default="demo",
+                        help="demo (los 5 prompts de la API) o escenarios (escenarios 1 a 6 con variantes)")
     parser.add_argument("--modelo", choices=MODELOS, default="guion")
     parser.add_argument("--repeticiones", type=int, default=3)
-    parser.add_argument("--aprobador", choices=["rechazar", "aprobar"], default="rechazar",
-                        help="respuesta del aprobador HITL en la Config. B (por defecto rechaza)")
+    parser.add_argument("--aprobador", choices=MODOS_APROBADOR, default=None,
+                        help="aprobador HITL de la Config. B: auto (aprueba lo legítimo y rechaza los ataques; "
+                             "por defecto en escenarios), rechazar (por defecto en demo) o aprobar")
+    parser.add_argument("--temperatura", type=float, default=None,
+                        help="temperatura del modelo, la misma en A y B (por defecto MODEL_TEMPERATURE o 0)")
+    parser.add_argument("--sin-verificador", action="store_true",
+                        help="Config. B sin el verificador de entrada (en qué capa se contiene el escenario 6)")
+    parser.add_argument("--reanudar", action="store_true",
+                        help="continúa un experimento cortado (p. ej. por la cuota) sin repetir corridas")
     parser.add_argument("--pausa", type=float, default=None,
                         help="segundos entre corridas (por defecto 4 con modelos remotos, 0 sin red)")
     parser.add_argument("--reintentos", type=int, default=None,
@@ -351,12 +505,17 @@ def main() -> None:
     args = parser.parse_args()
     if args.repeticiones < 1:
         parser.error("--repeticiones debe ser al menos 1")
+    if args.temperatura is not None and not 0 <= args.temperatura <= 2:
+        parser.error("--temperatura debe estar entre 0 y 2")
     pausa = args.pausa if args.pausa is not None else (4.0 if args.modelo in REMOTOS else 0.0)
     reintentos = args.reintentos if args.reintentos is not None else (3 if args.modelo in REMOTOS else 0)
+    aprobador = args.aprobador or ("auto" if args.conjunto == "escenarios" else "rechazar")
 
     ruta_json, ruta_md, _ = ejecutar(
         args.modelo, args.repeticiones, carpeta_datos=args.datos, carpeta_salida=args.salida,
-        aprobador=args.aprobador, pausa=pausa, reintentos=reintentos, espera_reintento=args.espera_reintento,
+        aprobador=aprobador, pausa=pausa, reintentos=reintentos, espera_reintento=args.espera_reintento,
+        conjunto=args.conjunto, verificador=not args.sin_verificador, reanudar=args.reanudar,
+        temperatura=args.temperatura,
     )
     print()
     print(ruta_md.read_text(encoding="utf-8"))
