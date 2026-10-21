@@ -166,6 +166,69 @@ Ninguno de los cinco prompts llega hoy a HITL (la exfiltración ya es BLOCK). La
 separación de funciones (escenario 9) y la alerta entre áreas (escenario 7) se prueban en
 `tests/test_integracion_core.py`; los prompts de esos escenarios los define la Persona 1.
 
+## API web (Avance 3, Persona 2)
+
+`andimarket/api/` expone la Config. A y la Config. B con FastAPI para el frontend. El chat corre siempre
+en la Config. B con todos los controles; la Config. A solo aparece en la comparación, que es un
+laboratorio aislado (bases en `data/api/` y controles en memoria: no toca la base del chat ni el log de
+Seguridad).
+
+**Arrancar (Windows):**
+
+    set ANDIMARKET_CLAVE_DEMO=una-clave-para-el-equipo
+    python -m andimarket.api
+
+En PowerShell la variable se define con `$env:ANDIMARKET_CLAVE_DEMO="una-clave-para-el-equipo"`. Si no
+se define, la API genera una clave al azar y la imprime en la consola. Queda en
+`http://127.0.0.1:8000`; la documentación interactiva (para probar cada endpoint) está en
+`http://127.0.0.1:8000/docs`.
+
+Opciones: `--puerto`, `--modelo` (modelo del chat: `simulado` por defecto, o `gemini`, `groq`, `ollama`),
+`--espera-hitl` (segundos que una acción HITL espera al aprobador; 120 por defecto) y `--politica`.
+
+**Sesión.** `POST /api/login` con `{"usuario", "clave"}` devuelve un token; los demás endpoints lo piden
+en `Authorization: Bearer <token>`. Los usuarios son los de `andimarket/directorio.py` y todos usan la
+misma clave de demostración. La identidad (área y nivel) sale del directorio, nunca del cuerpo de la
+petición. Tras 5 intentos fallidos seguidos, ese usuario queda bloqueado 5 minutos. El token vive en
+memoria (por ahora no es JWT): al reiniciar la API hay que volver a iniciar sesión.
+
+**Chat con polling.** `POST /api/chat` con `{"mensaje": "..."}` (modelo del chat) o
+`{"prompt_id": "inyeccion"}` (prompt de demostración con el modelo de guion, pero con la identidad de
+quien inició sesión) responde `202` con el id de la ejecución. El frontend consulta
+`GET /api/ejecuciones/{id}?desde=N` cada uno o dos segundos y recibe solo los eventos nuevos, hasta que
+el estado es `terminada` o `error`.
+
+**HITL desde la web.** Si `authorize()` responde HITL, la ejecución pasa a `esperando_aprobacion` y la
+solicitud queda PENDING en la cola de `agentguard-core`. Quien aprueba la ve en `GET /api/aprobaciones`
+y la decide con `POST /api/aprobaciones/{id}` (`{"aprobar": true, "comentario": "..."}`). El core valida
+la separación de funciones: el solicitante recibe `403 autoaprobacion`, el jefe de otra área
+`403 aprobador_ajeno_al_area`. Si nadie responde a tiempo, la solicitud se anula y la acción no se
+ejecuta. Ejemplo: `ana.atencion` escribe "Actualiza el pedido 125 a entregado" y `laura.atencion` lo
+aprueba.
+
+**Una ejecución a la vez.** Mientras corre una (o espera una aprobación), `POST /api/chat` y
+`POST /api/comparacion` responden `409`; las aprobaciones sí se pueden decidir.
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /api/salud` | Estado de la API (sin sesión) |
+| `POST /api/login`, `POST /api/logout`, `GET /api/me` | Sesión y perfil (área, nivel, herramientas, si aprueba HITL) |
+| `GET /api/prompts` | Prompts de demostración |
+| `POST /api/chat`, `GET /api/chat/historial`, `GET /api/ejecuciones/{id}` | Asistente (Config. B) |
+| `GET /api/aprobaciones`, `POST /api/aprobaciones/{id}` | Cola HITL |
+| `GET /api/seguridad/resumen`, `/registro`, `/alertas`, `/verificar` | Log encadenado visible para la sesión e integridad |
+| `GET /api/politicas` | `policies.yaml` en solo lectura y las herramientas de mi área |
+| `POST /api/comparacion` | Un prompt en la Config. A y en la Config. B, lado a lado |
+| `POST /api/comparacion/experimento`, `GET /api/comparacion/resultados` | Experimento con guion y los guardados en `evidencia/` |
+| `POST /api/demo/reiniciar` | Restaura la base del chat (solo Tecnología o Gerencia) |
+
+**Quién ve qué en Seguridad.** Cada persona ve sus decisiones y veredictos, las solicitudes HITL en las
+que fue solicitante o aprobador, y los avisos que originó o que van a su área. Así Tecnología recibe
+las alertas de toda la organización, pero no ve las decisiones de los demás. La verificación de
+integridad la puede pedir cualquiera.
+
+Pruebas: `pytest tests/test_api.py` (28 pruebas, sin red).
+
 ## Experimento con un modelo real (Avance 2, Persona 4)
 
 Por defecto, la Config. A y la Config. B usan el modelo de guion (determinista, sin red), que es el de
