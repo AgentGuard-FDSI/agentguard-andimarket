@@ -73,3 +73,33 @@ CREATE TRIGGER IF NOT EXISTS audit_sin_delete BEFORE DELETE ON audit_logs
 BEGIN
     SELECT RAISE(ABORT, 'audit_logs es de solo inserción');
 END;
+
+-- Verificador de entrada de AgentGuard (Config. B, Avance 3): una fila por prompt revisado ANTES
+-- de llamar al modelo. REJECT = el prompt no llega al agente (no se ejecuta ninguna herramienta).
+-- No guarda el texto del prompt, solo los temas y reglas que coincidieron.
+CREATE TABLE IF NOT EXISTS verificador_entrada (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,       -- UTC, ISO 8601
+    run_id      TEXT NOT NULL,
+    config      TEXT NOT NULL,       -- B
+    usuario     TEXT NOT NULL,
+    area        TEXT NOT NULL,
+    nivel       TEXT NOT NULL,
+    accion      TEXT NOT NULL CHECK (accion IN ('PASS', 'REJECT')),
+    temas_json  TEXT NOT NULL,       -- ["pii_masiva", ...]
+    reglas_json TEXT NOT NULL,
+    motivo      TEXT NOT NULL,
+    notificado  INTEGER NOT NULL CHECK (notificado IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_entrada_run ON verificador_entrada (run_id);
+
+CREATE TRIGGER IF NOT EXISTS entrada_sin_update BEFORE UPDATE ON verificador_entrada
+BEGIN
+    SELECT RAISE(ABORT, 'verificador_entrada es de solo inserción');
+END;
+
+CREATE TRIGGER IF NOT EXISTS entrada_sin_delete BEFORE DELETE ON verificador_entrada
+BEGIN
+    SELECT RAISE(ABORT, 'verificador_entrada es de solo inserción');
+END;
