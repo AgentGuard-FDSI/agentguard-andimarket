@@ -8,3 +8,7 @@ requests>=2.31
 # (misma carpeta padre): de ahí se instala el paquete y se lee config/policies.yaml.
 # Ejecutar pip desde la raíz de este repositorio.
 -e ../agentguard-core
+
+# API web (Avance 3): python -m andimarket.api
+fastapi>=0.110
+uvicorn>=0.29

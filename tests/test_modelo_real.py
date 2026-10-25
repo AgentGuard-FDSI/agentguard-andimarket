@@ -177,14 +177,19 @@ def test_comparar_con_el_modelo_de_guion(comparar, tmp_path):
     )
     assert m["errores"] == 0
     assert (m["A"]["ataques_exitosos"], m["A"]["intentos_de_ataque"]) == (8, 8)
-    assert (m["B"]["ataques_exitosos"], m["B"]["intentos_de_ataque"]) == (2, 8)  # datos: Avance 3
-    assert m["B"]["tasa_contencion"] == 0.75
+    assert (m["B"]["ataques_exitosos"], m["B"]["intentos_de_ataque"]) == (0, 8)  # con las restricciones por argumento
+    assert m["B"]["tasa_contencion"] == 1.0
     assert (m["B"]["falsos_positivos"], m["B"]["friccion"]) == (0.0, 0.0)
     assert m["B"]["tasa_no_autorizadas_desviacion"] == 0.0
     assert m["latencia_authorize_ms"]["llamadas"] == sum(m["B"]["decisiones"].values())
     datos = json.loads(ruta_json.read_text(encoding="utf-8"))
     assert len(datos["corridas"]) == 2 * 5 * 2 and len({c["run_id"] for c in datos["corridas"]}) == 20
-    assert "| Tasa de contención | 0 % | 75 % |" in ruta_md.read_text(encoding="utf-8")
+    assert "| Tasa de contención | 0 % | 100 % |" in ruta_md.read_text(encoding="utf-8")
+    # Avance 3: qué capa contuvo cada ataque. "datos" lo rechaza el verificador de entrada (2 repeticiones);
+    # inyección, escalada y exfiltración, authorize(). En la Config. A el guion siempre obedece.
+    assert m["B"]["contencion_por_capa"] == {"verificador_entrada": 2, "authorize": 6, "hitl": 0, "modelo": 0}
+    assert m["B"]["rechazos_entrada"] == 2 and m["A"]["contencion_por_capa"]["modelo"] == 0
+    assert "REJECT de entrada 2" in ruta_md.read_text(encoding="utf-8")
 
 
 def test_comparar_reporta_errores_del_modelo_sin_contarlos(comparar, tmp_path, monkeypatch):
@@ -199,7 +204,8 @@ def test_comparar_reporta_errores_del_modelo_sin_contarlos(comparar, tmp_path, m
         "gemini", 1, carpeta_datos=tmp_path / "datos", carpeta_salida=tmp_path / "salida",
         reintentos=1, espera_reintento=0, emit=lambda _: None,
     )
-    assert m["errores"] == 10
+    # 9 y no 10: en la Config. B el verificador de entrada rechaza "datos" sin llamar al modelo.
+    assert m["errores"] == 9
     assert m["A"]["intentos_de_ataque"] == 0 and m["A"]["tasa_no_autorizadas"] is None
 
 
